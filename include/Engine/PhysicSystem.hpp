@@ -10,11 +10,51 @@
 
 #include <cfloat>
 #include <cmath>
+#include <vector>
 
 class PhysicSystem
 {
 protected:
     GameData& data;
+
+    std::vector<MonitorTopologyItem> resolveMonitorTopologyForCollision() const
+    {
+        if (data.worldSampling)
+        {
+            const auto cachedTopology = data.worldSampling->getMonitorTopologySnapshot();
+            if (!cachedTopology.empty())
+                return cachedTopology;
+        }
+
+        if (!data.monitors.getMonitorsCount())
+            return {};
+
+        const int monitorCount = data.monitors.getMonitorsCount();
+        std::vector<MonitorTopologyItem> topology;
+        topology.reserve(static_cast<std::size_t>(monitorCount));
+
+        for (int monitorIndex = 0; monitorIndex < monitorCount; ++monitorIndex)
+        {
+            MonitorTopologyItem topologyItem;
+            Vec2i logicalPosition;
+            Vec2i logicalSize;
+            data.monitors.getMonitorPosition(monitorIndex, logicalPosition);
+            data.monitors.getMonitorSize(monitorIndex, logicalSize);
+            if (logicalSize.x <= 0 || logicalSize.y <= 0)
+                continue;
+
+            data.monitors.getMonitorPixelPosition(monitorIndex, topologyItem.pixelPosition);
+            data.monitors.getMonitorPixelSize(monitorIndex, topologyItem.pixelSize);
+            topologyItem.position   = logicalPosition;
+            topologyItem.size       = logicalSize;
+            topologyItem.contentScale = data.monitors.getMonitorScale(monitorIndex);
+            topologyItem.pixelPerMeter = data.monitors.getPixelPerMeterForMonitor(monitorIndex);
+            topologyItem.physicalSize = data.monitors.getMonitorPhysicalSize(monitorIndex);
+            topology.push_back(topologyItem);
+        }
+
+        return topology;
+    }
 
 public:
     PhysicSystem(GameData& data) : data{data}
@@ -51,8 +91,7 @@ public:
 
     void computeMonitorCollisions(PhysicComponent& comp)
     {
-        const std::vector<MonitorTopologyItem> monitorsTopology =
-            data.worldSampling ? data.worldSampling->getMonitorTopologySnapshot() : std::vector<MonitorTopologyItem>{};
+        const std::vector<MonitorTopologyItem> monitorsTopology = resolveMonitorTopologyForCollision();
         if (monitorsTopology.empty())
             return;
         bool               isOutside          = true;

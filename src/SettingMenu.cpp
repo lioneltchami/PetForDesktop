@@ -14,6 +14,14 @@ SettingMenu::SettingMenu(GameData& inDatas, Pet& inPet, Vec2 inPosition)
 
 SettingMenu::~SettingMenu()
 {
+    Setting::ValidationReport report;
+    if (!Setting::validateForRuntime(datas, report))
+    {
+        for (const auto& errorItem : report.errors)
+            logf("Invalid setting before save (%s): %s\n", errorItem.section.c_str(),
+                 (errorItem.section + ": " + errorItem.field + ": " + errorItem.message).c_str());
+    }
+
     Setting::instance().exportFile(RESOURCE_PATH "/setting/setting.yaml", datas);
 }
 

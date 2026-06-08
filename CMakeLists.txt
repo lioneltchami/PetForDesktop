@@ -156,7 +156,6 @@ add_executable(pet-p2-tests
     src/FileExplorer.cpp
     src/PlatformServices.cpp
     src/Settings.cpp
-    src/UpdateMenu.cpp
     src/MonitorTopologyCache.cpp
     src/Updater.cpp
 )
@@ -166,6 +165,7 @@ target_include_directories(pet-p2-tests PRIVATE ${ABS_DEPS_DIR}/imgui/imgui)
 
 target_link_libraries(pet-p2-tests PRIVATE Boxer yaml-cpp cpr glfw)
 
+target_compile_definitions(pet-p2-tests PRIVATE PET_P2_TESTS)
 target_compile_definitions(pet-p2-tests PRIVATE PROJECT_NAME="${PROJECT_NAME}")
 target_compile_definitions(pet-p2-tests PRIVATE PROJECT_VERSION="${PROJECT_VERSION}")
 target_compile_definitions(pet-p2-tests PRIVATE RESOURCE_PATH="${REL_RESOURCES_DIR}")

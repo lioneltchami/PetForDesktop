@@ -28,7 +28,10 @@ constexpr std::size_t kMaxDownloadBytes = 1024u * 1024u * 300u; // 300MB hard ca
 constexpr std::size_t kMaxMetadataBytes = 1024u * 1024u; // 1MB metadata payload cap
 constexpr std::size_t kMaxReleaseNotesBytes = 1024u * 1024u; // 1MB
 constexpr std::size_t kMaxAssetUrlLength = 4096;
-constexpr std::array<const char*, 2> kTrustedUpdateHosts = {"github.com", "api.github.com"};
+constexpr std::size_t kMaxMetadataTextBytes = 128u * 1024u;
+constexpr std::size_t kManifestMaxPackageNameLength = 255u;
+constexpr std::array<const char*, 4> kTrustedUpdateHosts = {"github.com", "api.github.com", "objects.githubusercontent.com",
+                                                           "github-releases.githubusercontent.com"};
 
 struct Version
 {
@@ -244,6 +247,27 @@ bool isTrustedHost(const std::string& host)
     return false;
 }
 
+bool isTrustedHostForUpdate(const std::string& urlHost)
+{
+    if (urlHost.empty())
+        return false;
+
+    for (const auto& host : kTrustedUpdateHosts)
+    {
+        if (urlHost == host)
+            return true;
+
+        if (urlHost.size() > strlen(host) + 1 && urlHost.compare(urlHost.size() - strlen(host), strlen(host), host) == 0)
+        {
+            const char preceding = urlHost[urlHost.size() - strlen(host) - 1];
+            if (preceding == '.')
+                return true;
+        }
+    }
+
+    return false;
+}
+
 bool extractUrlHost(const std::string& url, std::string& host)
 {
     const auto schemePos = url.find("://");
@@ -297,7 +321,10 @@ bool isHttpsUrl(const std::string& value)
         return false;
 
     std::string host;
-    if (!extractUrlHost(value, host) || !isTrustedHost(host))
+    if (!extractUrlHost(value, host))
+        return false;
+
+    if (!isTrustedHostForUpdate(toLowerAscii(host)))
         return false;
 
     return true;
@@ -410,6 +437,8 @@ bool parseManifestFromText(const std::string& manifestText, UpdateMetadata& meta
         {
             metadata.packageUrl = value;
             metadata.packageName = extractFilenameFromUrl(value);
+            if (metadata.packageName.size() > kManifestMaxPackageNameLength)
+                metadata.packageName = metadata.packageName.substr(0, kManifestMaxPackageNameLength);
             hasAny = true;
         }
     }
@@ -441,6 +470,8 @@ bool parseManifestFromText(const std::string& manifestText, UpdateMetadata& meta
     if (parseJsonStringField(manifestText, "checksum_algorithm", value))
     {
         metadata.checksumAlgorithm = value;
+        if (metadata.checksum.empty())
+            metadata.checksumAlgorithm.clear();
     }
 
     std::uint64_t packageSize = 0;
@@ -521,6 +552,12 @@ bool downloadToFile(const std::string& url, const std::filesystem::path& staging
 
 bool validateMetadataEnvelope(const UpdateMetadata& metadata, std::string& error)
 {
+    if (!metadata.tag.empty() && metadata.tag.size() > 64u)
+    {
+        error = "Metadata tag is too long";
+        return false;
+    }
+
     if (metadata.tag.empty())
     {
         error = "Metadata missing release tag";
@@ -536,6 +573,18 @@ bool validateMetadataEnvelope(const UpdateMetadata& metadata, std::string& error
     if (metadata.packageUrl.empty() && metadata.packageName.empty())
     {
         error = "Metadata missing package download target";
+        return false;
+    }
+
+    if (metadata.packageName.size() > kManifestMaxPackageNameLength)
+    {
+        error = "Metadata package name is too long";
+        return false;
+    }
+
+    if (metadata.packageSize > kMaxDownloadBytes)
+    {
+        error = "Manifest package size exceeds policy";
         return false;
     }
 
@@ -565,30 +614,20 @@ bool validateMetadataEnvelope(const UpdateMetadata& metadata, std::string& error
 
     if (!metadata.signature.empty())
     {
-        if (metadata.signatureAlgorithm.empty())
-        {
-            error = "Signed metadata missing signature algorithm";
-            return false;
-        }
+        const std::string signatureAlgorithm =
+            metadata.signatureAlgorithm.empty() ? std::string("sha256") : metadata.signatureAlgorithm;
 
-        if (metadata.signatureAlgorithm != "rsa-sha256" && metadata.signatureAlgorithm != "ed25519" &&
-            metadata.signatureAlgorithm != "sha256")
+        if (signatureAlgorithm != "rsa-sha256" && signatureAlgorithm != "ed25519" && signatureAlgorithm != "sha256")
         {
             error = "Unsupported signature algorithm";
             return false;
         }
 
-        if (metadata.signatureAlgorithm != "sha256" && metadata.signaturePublicKey.empty())
+        if (!isValidSignatureFormat(metadata.signature))
         {
-            error = "Signed metadata missing signature public key";
+            error = "Signed metadata uses unsupported signature format";
             return false;
         }
-
-        if (!isValidSignatureFormat(metadata.signature))
-            {
-                error = "Signed metadata uses unsupported signature format";
-                return false;
-            }
 
         if (metadata.signature.size() != 64)
         {
@@ -600,6 +639,16 @@ bool validateMetadataEnvelope(const UpdateMetadata& metadata, std::string& error
         {
             error = "Signature contains non-hex characters";
             return false;
+        }
+
+        if (signatureAlgorithm == "sha256")
+        {
+            if (!metadata.checksum.empty() && !metadata.checksumAlgorithm.empty() &&
+                metadata.checksumAlgorithm != "sha256")
+            {
+                error = "SHA256 signature requires checksum algorithm sha256";
+                return false;
+            }
         }
     }
 
@@ -1103,6 +1152,10 @@ bool Updater::applyPackage(const std::filesystem::path& stagedFile, const Update
 
 bool Updater::checkForUpdate(GameData& datas)
 {
+#ifdef PET_P2_TESTS
+    (void)datas;
+    return false;
+#else
     UpdateMetadata metadata;
     std::string error;
 
@@ -1161,6 +1214,7 @@ bool Updater::checkForUpdate(GameData& datas)
         });
 
     return true;
+#endif
 }
 
 bool Updater::parseManifestForTest(const std::string& manifestText, UpdateMetadata& metadata)

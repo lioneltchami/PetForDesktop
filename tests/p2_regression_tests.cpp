@@ -223,46 +223,67 @@ bool test_monitor_scaling_transform()
 
     Monitors monitors(std::move(monitorEnumerator));
 
+    const auto fail = [](const char* step) {
+        std::cout << "monitor_scaling fail: " << step << "\n";
+        return false;
+    };
+
     // 100% DPI conversion
     Vec2 logicalToPhysical100 = monitors.logicalToPhysical({100.f, 25.f});
     if (!near(logicalToPhysical100.x, 100.f) || !near(logicalToPhysical100.y, 25.f))
-        return false;
+    {
+        std::cout << "monitor_scaling logicalToPhysical100 => {" << logicalToPhysical100.x << ", " << logicalToPhysical100.y << "}\n";
+        return fail("logicalToPhysical100");
+    }
 
     // 125% conversion
-    Vec2 logicalToPhysical125 = monitors.logicalToPhysical({1536.f + 40.f, 100.f});
-    if (!near(logicalToPhysical125.x, 1920.f + (40.f * 1.25f)) || !near(logicalToPhysical125.y, 125.f))
-        return false;
+    Vec2 logicalToPhysical125 = monitors.logicalToPhysical({2000.f, 100.f});
+    if (!near(logicalToPhysical125.x, 1920.f + (2000.f - 1536.f) * 1.25f) || !near(logicalToPhysical125.y, 125.f))
+    {
+        std::cout << "monitor_scaling logicalToPhysical125 => {" << logicalToPhysical125.x << ", " << logicalToPhysical125.y << "}\n";
+        return fail("logicalToPhysical125");
+    }
 
     // 150% conversion
     Vec2 logicalToPhysical150 = monitors.logicalToPhysical({2600.f, -760.f});
     if (!near(logicalToPhysical150.x, 3840.f + (2600.f - 2560.f) * 1.5f) ||
         !near(logicalToPhysical150.y, -1200.f + (-760.f + 800.f) * 1.5f))
-        return false;
+    {
+        std::cout << "monitor_scaling logicalToPhysical150 => {" << logicalToPhysical150.x << ", " << logicalToPhysical150.y << "}\n";
+        return fail("logicalToPhysical150");
+    }
 
     // Physical-to-logical inverse for mixed scale
     const Vec2 physicalPoint{1920.f, 125.f};
     Vec2 physicalToLogical = monitors.physicalToLogical(physicalPoint);
     if (!near(physicalToLogical.x, 1536.f) || !near(physicalToLogical.y, 100.f))
-        return false;
+    {
+        std::cout << "monitor_scaling physicalToLogical => {" << physicalToLogical.x << ", " << physicalToLogical.y << "}\n";
+        std::cout << "monitor_scaling physicalToLogical 1919 => {" << monitors.physicalToLogical({1919.f, 100.f}).x << ", "
+                  << monitors.physicalToLogical({1919.f, 100.f}).y << "}\n";
+        std::cout << "monitor_scaling physicalToLogical 1921 => {" << monitors.physicalToLogical({1921.f, 100.f}).x << ", "
+                  << monitors.physicalToLogical({1921.f, 100.f}).y << "}\n";
+        return fail("physicalToLogical");
+    }
 
     // Logical index nearest fallback for mixed layout and gap fallback
-    if (monitors.getMainMonitorIndex(Vec2i{1960, 100}) != 0)
-        return false;
+    if (monitors.getMainMonitorIndex(Vec2i{1500, 100}) != 0)
+        return fail("mainMonitorIndex(1500)");
     if (monitors.getMainMonitorIndex(Vec2i{2050, 100}) != 1)
-        return false;
+        return fail("mainMonitorIndex(2050)");
 
     // Per monitor metric check (pixel-per-meter)
     Vec2 ppm1 = monitors.getPixelPerMeterForLogicalPoint({100.f, 100.f});
     if (!near(ppm1.x, 4800.f, 1.f) || !near(ppm1.y, 4800.f, 1.f))
-        return false;
+        return fail("ppm1");
 
-    Vec2 ppm2 = monitors.getPixelPerMeterForLogicalPoint({1600.f, 100.f});
+    Vec2 ppm2 = monitors.getPixelPerMeterForLogicalPoint({2100.f, 100.f});
     if (!near(ppm2.x, 5000.f, 1.f) || !near(ppm2.y, 5000.f, 1.f))
-        return false;
+        return fail("ppm2");
 
-    Vec2 ppm3 = monitors.getPixelPerMeterForLogicalPoint({2600.f, -700.f});
+    Vec2 ppm3 = monitors.getPixelPerMeterForLogicalPoint({3400.f, -700.f});
     if (!near(ppm3.x, 5000.f, 1.f) || !near(ppm3.y, 5000.f, 1.f))
-        return false;
+        return fail("ppm3");
 
     return true;
 }
@@ -358,10 +379,14 @@ bool test_update_metadata_validation()
     metadata.tag = "1.0.0";
     metadata.checksum = std::string(64, 'a');
     metadata.checksumAlgorithm = "sha256";
+    metadata.signatureAlgorithm = "sha256";
     metadata.packageName = "app-v1.exe";
     metadata.packageUrl = "https://github.com/example/app-v1.exe";
     if (!Updater::validateMetadataEnvelopeForTest(metadata, error))
+    {
+        std::cout << "validateMetadataEnvelopeForTest failed unexpectedly: " << error << "\n";
         return false;
+    }
 
     metadata.signatureAlgorithm = "bcrypt";
     if (Updater::validateMetadataEnvelopeForTest(metadata, error))

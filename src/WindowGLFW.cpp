@@ -7,6 +7,7 @@
 #include "Engine/Monitors.hpp"
 
 #include <atomic>
+#include <cmath>
 
 namespace
 {
@@ -84,8 +85,9 @@ void cursorPositionCallback(GLFWwindow* window, double x, double y)
     GameData& datas = *static_cast<GameData*>(glfwGetWindowUserPointer(window));
     if (datas.leftButtonEvent == GLFW_PRESS)
     {
-        float globalScreenPosX = static_cast<float>(datas.window->getPosition().x + x);
-        float globalScreenPosY = static_cast<float>(datas.window->getPosition().y + y);
+        const Vec2  windowLogicalPos = datas.window->getPosition();
+        const float globalScreenPosX = static_cast<float>(windowLogicalPos.x) + static_cast<float>(std::round(x));
+        const float globalScreenPosY = static_cast<float>(windowLogicalPos.y) + static_cast<float>(std::round(y));
         datas.deltaCursorPosX += globalScreenPosX - datas.prevCursorPosX;
         datas.deltaCursorPosY += globalScreenPosY - datas.prevCursorPosY;
         datas.prevCursorPosX = globalScreenPosX;
@@ -108,8 +110,9 @@ void mousButtonCallBack(GLFWwindow* window, int button, int action, int mods)
         switch (action)
         {
         case GLFW_PRESS: {
-            datas.prevCursorPosX  = static_cast<float>(datas.window->getPosition().x + datas.cursorPos.x);
-            datas.prevCursorPosY  = static_cast<float>(datas.window->getPosition().y + datas.cursorPos.y);
+            const Vec2 windowLogicalPos = datas.window->getPosition();
+            datas.prevCursorPosX  = windowLogicalPos.x + static_cast<float>(datas.cursorPos.x);
+            datas.prevCursorPosY  = windowLogicalPos.y + static_cast<float>(datas.cursorPos.y);
             datas.deltaCursorPosX = 0.f;
             datas.deltaCursorPosY = 0.f;
             break;
@@ -135,7 +138,7 @@ void processInput(GLFWwindow* window)
     // Need always capture the mouse position to trigger the pass through
     double cursPosX, cursPosY;
     glfwGetCursorPos(window, &cursPosX, &cursPosY);
-    datas.cursorPos = {static_cast<int>(floor(cursPosX)), static_cast<int>(floor(cursPosY))};
+    datas.cursorPos = {static_cast<int>(std::lround(cursPosX)), static_cast<int>(std::lround(cursPosY))};
     
     if (glfwGetKey(window, GLFW_KEY_ESCAPE) == GLFW_PRESS)
         glfwSetWindowShouldClose(window, true);

@@ -14,6 +14,25 @@
 class Monitors
 {
 public:
+    struct CoordinateAffineTransform
+    {
+        Vec2 scale = Vec2::one();
+        Vec2 offset = Vec2::zero();
+
+        Vec2 transformLogicalToPhysical(const Vec2& logicalPoint) const
+        {
+            return {logicalPoint.x * scale.x + offset.x, logicalPoint.y * scale.y + offset.y};
+        }
+
+        Vec2 transformPhysicalToLogical(const Vec2& pixelPoint) const
+        {
+            const float safeScaleX = std::max(scale.x, 0.0001f);
+            const float safeScaleY = std::max(scale.y, 0.0001f);
+
+            return {(pixelPoint.x - offset.x) / safeScaleX, (pixelPoint.y - offset.y) / safeScaleY};
+        }
+    };
+
     struct MonitorTransform
     {
         Vec2i logicalPosition = Vec2i::zero();
@@ -23,23 +42,17 @@ public:
         Vec2i physicalSize   = Vec2i::zero();
         Vec2  pixelPerMeter  = {3779.527f, 3779.527f};
         Vec2  contentScale   = Vec2::one();
+        CoordinateAffineTransform logicalToPhysicalTransform;
+        CoordinateAffineTransform physicalToLogicalTransform;
 
         Vec2 logicalToPhysical(const Vec2& logicalPoint) const
         {
-            const float safeScaleX = std::max(contentScale.x, 0.0001f);
-            const float safeScaleY = std::max(contentScale.y, 0.0001f);
-
-            return {(logicalPoint.x - static_cast<float>(logicalPosition.x)) * safeScaleX + static_cast<float>(pixelPosition.x),
-                    (logicalPoint.y - static_cast<float>(logicalPosition.y)) * safeScaleY + static_cast<float>(pixelPosition.y)};
+            return logicalToPhysicalTransform.transformLogicalToPhysical(logicalPoint);
         }
 
         Vec2 physicalToLogical(const Vec2& pixelPoint) const
         {
-            const float safeScaleX = std::max(contentScale.x, 0.0001f);
-            const float safeScaleY = std::max(contentScale.y, 0.0001f);
-
-            return {(pixelPoint.x - static_cast<float>(pixelPosition.x)) / safeScaleX + static_cast<float>(logicalPosition.x),
-                    (pixelPoint.y - static_cast<float>(pixelPosition.y)) / safeScaleY + static_cast<float>(logicalPosition.y)};
+            return physicalToLogicalTransform.transformPhysicalToLogical(pixelPoint);
         }
 
         bool containsLogicalPoint(const Vec2& point) const
@@ -81,6 +94,16 @@ protected:
         if (transform.contentScale.x <= 0.f || transform.contentScale.y <= 0.f ||
             !std::isfinite(transform.contentScale.x) || !std::isfinite(transform.contentScale.y))
             transform.contentScale = Vec2::one();
+
+        transform.logicalToPhysicalTransform.scale = {std::max(transform.contentScale.x, 0.0001f),
+                                                    std::max(transform.contentScale.y, 0.0001f)};
+        transform.logicalToPhysicalTransform.offset = {
+            static_cast<float>(transform.pixelPosition.x) -
+                static_cast<float>(transform.logicalPosition.x) * transform.logicalToPhysicalTransform.scale.x,
+            static_cast<float>(transform.pixelPosition.y) -
+                static_cast<float>(transform.logicalPosition.y) * transform.logicalToPhysicalTransform.scale.y};
+        transform.physicalToLogicalTransform.scale = transform.logicalToPhysicalTransform.scale;
+        transform.physicalToLogicalTransform.offset = transform.logicalToPhysicalTransform.offset;
 
         if (transform.physicalSize.x > 0 && transform.physicalSize.y > 0)
         {
@@ -280,13 +303,11 @@ public:
 
     std::optional<MonitorTransform> getMonitorTransformForLogicalPoint(Vec2 logicalPoint) const
     {
-        std::lock_guard lock{m_mutex};
         return findMonitorTransformForPoint(logicalPoint, false);
     }
 
     std::optional<MonitorTransform> getMonitorTransformForPhysicalPoint(Vec2 pixelPoint) const
     {
-        std::lock_guard lock{m_mutex};
         return findMonitorTransformForPoint(pixelPoint, true);
     }
 

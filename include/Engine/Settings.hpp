@@ -31,6 +31,8 @@ public:
 
     void exportFile(const char* dest, GameData& data);
 
+    static bool validateForRuntime(const GameData& data, ValidationReport& report);
+
     static bool sanitize(GameData& data);
 
     static void clampForRuntime(GameData& data);

@@ -29,7 +29,7 @@ inline int fopen_s(FILE** file, const char* filename, const char* mode)
 }
 #endif
 
-namespace
+namespace SettingIO
 {
 constexpr int kMinFPS = 1;
 constexpr int kMaxFPS = 500;
@@ -50,6 +50,7 @@ constexpr float kMaxCollisionRatio = 1.f;
 constexpr float kMinPositiveFloat = 0.0001f;
 constexpr int kMinFootBasement = 1;
 constexpr std::size_t kMaxThemeNameLength = 64;
+constexpr std::size_t kMaxImportFileBytes = 1024u * 1024u;
 
 constexpr std::array<std::string_view, 9> kAllowedSections = {"Game", "Physic", "GamePlay", "Window", "Style",
                                                            "Accessibility", "Debug", "Graphics", "Display"};
@@ -110,6 +111,27 @@ void addValidationIssue(Setting::ValidationReport& report, const std::string& fi
     {
         report.warnings.emplace_back(std::move(issue));
     }
+}
+
+bool isSafeAsciiName(const std::string& value)
+{
+    for (const char c : value)
+    {
+        if (static_cast<unsigned char>(c) < 0x20 || static_cast<unsigned char>(c) == 0x7f)
+            return false;
+    }
+
+    return true;
+}
+
+bool isInRange(const float value, const float minimum, const float maximum)
+{
+    return std::isfinite(value) && value >= minimum && value <= maximum;
+}
+
+bool isInRange(const int value, const int minimum, const int maximum)
+{
+    return value >= minimum && value <= maximum;
 }
 
 template <typename T>
@@ -320,6 +342,56 @@ void clampAndNormalize(GameData& data)
         data.styleName = "PetForDesktop";
 }
 
+bool validateForRuntime(const GameData& data, Setting::ValidationReport& report)
+{
+    bool valid = true;
+
+    if (!isInRange(data.FPS, kMinFPS, kMaxFPS))
+        valid = false;
+
+    if (!isInRange(data.scale, kMinScale, kMaxScale))
+        valid = false;
+
+    if (!isInRange(data.textScale, kMinTextScale, kMaxTextScale))
+    {
+        addValidationIssue(report, std::string(), "Accessibility", "TextScale", "Out of range text scale", false);
+        valid = false;
+    }
+
+    if (!isInRange(data.physicFrameRate, kMinPhysicsFrameRate, kMaxPhysicsFrameRate))
+    {
+        addValidationIssue(report, std::string(), "Game", "PhysicFrameRate", "Out of range simulation tick", false);
+        valid = false;
+    }
+
+    if (!isInRange(data.gravity.x, kMinGravity, kMaxGravity) || !isInRange(data.gravity.y, kMinGravity, kMaxGravity))
+    {
+        addValidationIssue(report, std::string(), "Physic", "Gravity", "Out of range gravity value", false);
+        valid = false;
+    }
+
+    if (!isInRange(data.bounciness, kMinBounciness, kMaxBounciness) ||
+        !isInRange(data.friction, kMinFriction, kMaxFriction))
+    {
+        addValidationIssue(report, std::string(), "Physic", "Movement", "Out of range movement parameter", false);
+        valid = false;
+    }
+
+    if (data.footBasementWidth < kMinFootBasement || data.footBasementHeight < kMinFootBasement)
+    {
+        addValidationIssue(report, std::string(), "Physic", "FootBasement", "Foot basement is below minimum size", false);
+        valid = false;
+    }
+
+    if (!isReasonableThemeName(data.styleName) || !isSafeAsciiName(data.styleName))
+    {
+        addValidationIssue(report, std::string(), "Style", "Theme", "Unsafe or unsupported theme name", true);
+        valid = false;
+    }
+
+    return valid;
+}
+
 void applyDefaults(GameData& data)
 {
     data.FPS        = 60;
@@ -348,20 +420,34 @@ void applyDefaults(GameData& data)
     data.styleName                 = "PetForDesktop";
     data.debugEdgeDetection        = false;
 }
+
+} // namespace SettingIO
+
+bool Setting::validateForRuntime(const GameData& data, Setting::ValidationReport& report)
+{
+    return SettingIO::validateForRuntime(data, report);
 }
+
+using namespace SettingIO;
 
 bool Setting::importFile(const char* src, GameData& data, ValidationReport& report)
 {
     report = ValidationReport{};
     const std::string srcPath = src ? src : "";
 
-    applyDefaults(data);
+    SettingIO::applyDefaults(data);
 
     YAML::Node root;
     try
     {
         if (!src)
             throw std::runtime_error("Settings source path is null");
+        const std::filesystem::path sourcePath(src);
+        std::error_code fileSizeError;
+        const auto fileSize = std::filesystem::file_size(sourcePath, fileSizeError);
+        if (fileSizeError || fileSize > kMaxImportFileBytes)
+            throw std::runtime_error("Settings file too large");
+
         root = YAML::LoadFile(src);
     }
     catch (...)
@@ -478,6 +564,7 @@ bool Setting::importFile(const char* src, GameData& data, ValidationReport& repo
     }
 
     Setting::sanitize(data);
+    SettingIO::validateForRuntime(data, report);
     return report.valid;
 }
 
@@ -502,7 +589,20 @@ void Setting::importFile(const char* src, GameData& data)
 
 void Setting::exportFile(const char* dest, GameData& data)
 {
+    ValidationReport validation;
     Setting::clampForRuntime(data);
+    const bool isValid = SettingIO::validateForRuntime(data, validation);
+    if (!isValid)
+    {
+        for (const auto& warningItem : validation.warnings)
+            warning((warningItem.section + ": " + warningItem.field + ": " + warningItem.message).c_str());
+
+        for (const auto& errorItem : validation.errors)
+        {
+            logf("Error in settings before export (%s): %s\n", errorItem.section.c_str(),
+                 (errorItem.section + ": " + errorItem.field + ": " + errorItem.message).c_str());
+        }
+    }
 
     const std::filesystem::path destinationPath(dest);
     const std::filesystem::path tempPath = destinationPath.string() + ".tmp";
@@ -632,11 +732,12 @@ void Setting::exportFile(const char* dest, GameData& data)
 
 bool Setting::sanitize(GameData& data)
 {
-    clampAndNormalize(data);
-    return true;
+    SettingIO::clampAndNormalize(data);
+    ValidationReport report;
+    return SettingIO::validateForRuntime(data, report);
 }
 
 void Setting::clampForRuntime(GameData& data)
 {
-    clampAndNormalize(data);
+    SettingIO::clampAndNormalize(data);
 }
