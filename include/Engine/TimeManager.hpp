@@ -6,6 +6,7 @@
 #include <GLFW/glfw3.h>
 
 #include <functional>
+#include <algorithm>
 #include <queue>
 #include <vector>
 #include <cmath>
@@ -35,9 +36,12 @@ protected:
     double m_time     = glfwGetTime();
     double m_tempTime = m_time;
 
-    double    m_timeAccLoop    = 0.;
-    double    m_deltaTime      = 0.;
-    double    m_fixedDeltaTime = 1. / 60.;
+    double    m_timeAccLoop       = 0.;
+    double    m_deltaTime         = 0.;
+    double    m_fixedDeltaTime    = 1. / 60.;
+    double    m_interpolation     = 0.;
+    int       m_maxSubSteps       = 8;
+    double    m_clampFrameTime    = 0.25;
     GameData* datas;
 
     std::priority_queue<TimerTask, std::vector<TimerTask>, std::greater<TimerTask>> m_timerQueue;
@@ -45,7 +49,7 @@ protected:
 public:
     void Init(GameData& data)
     {
-        m_fixedDeltaTime = 1. / data.FPS;
+        setFrameRate(data.FPS);
         datas = &data;
     }
 
@@ -64,35 +68,51 @@ public:
     void setFrameRate(int FPS)
     {
         m_fixedDeltaTime = 1. / FPS;
+        m_maxSubSteps   = std::max(1, static_cast<int>(std::ceil(m_clampFrameTime / m_fixedDeltaTime)));
     }
 
     void update(std::function<void(double deltaTime)> unlimitedUpdateFunction,
-                std::function<void(double deltaTime)> limitedUpdateFunction)
+                std::function<void(double deltaTime)> fixedUpdateFunction,
+                std::function<void(double interpolation)> renderUpdateFunction)
     {
-        /*unfixed update*/
-        unlimitedUpdateFunction(m_deltaTime);
-
         /*Prepar the next frame*/
         m_tempTime  = glfwGetTime();
         m_deltaTime = m_tempTime - m_time;
         m_time      = m_tempTime;
 
-        // This is temporary
-        if (m_deltaTime > 0.25)
-            m_deltaTime = 0.25;
+        if (m_deltaTime < 0.)
+            m_deltaTime = 0.;
+        m_deltaTime = std::min(m_deltaTime, m_clampFrameTime);
+
+        // prevent simulation burst after long stalls (pause, alt-tab, debugger break)
+        if (!std::isfinite(m_deltaTime))
+            m_deltaTime = m_fixedDeltaTime;
+
+        unlimitedUpdateFunction(m_deltaTime);
 
         /*Add accumulator*/
         datas->timeAcc += m_deltaTime;
-        datas->timeAcc *= !isinf(datas->timeAcc); // reset if isInf (avoid conditionnal jump)
+        if (!std::isfinite(datas->timeAcc))
+            datas->timeAcc = 0.;
 
-        /*Fixed update*/
         m_timeAccLoop += m_deltaTime;
 
-        if (m_timeAccLoop >= m_fixedDeltaTime)
+        int subStepCount = 0;
+        while (m_timeAccLoop >= m_fixedDeltaTime)
         {
-            limitedUpdateFunction(m_timeAccLoop);
-            m_timeAccLoop = 0.f;
+            fixedUpdateFunction(m_fixedDeltaTime);
+            m_timeAccLoop -= m_fixedDeltaTime;
+            ++subStepCount;
+
+            if (subStepCount >= m_maxSubSteps)
+            {
+                m_timeAccLoop = 0.;
+                break;
+            }
         }
+
+        m_interpolation = m_fixedDeltaTime != 0 ? std::min(1., std::max(0., m_timeAccLoop / m_fixedDeltaTime)) : 0;
+        renderUpdateFunction(m_interpolation);
 
         while (!m_timerQueue.empty() && m_timerQueue.top().globalTimer <= datas->timeAcc)
         {
@@ -113,5 +133,20 @@ public:
             datas->deltaCursorAcc -= elem.pos;
             datas->deltasCursorPosBuffer.pop();
         }
+    }
+
+    double getInterpolation() const
+    {
+        return m_interpolation;
+    }
+
+    double getDeltaTime() const
+    {
+        return m_deltaTime;
+    }
+
+    double getFixedDeltaTime() const
+    {
+        return m_fixedDeltaTime;
     }
 };

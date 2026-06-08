@@ -220,9 +220,21 @@ public:
         }};
 
         int                               frameCount = 0;
-        const std::function<void(double)> limitedUpdateDebugCollision{[&](double deltaTime) {
+        const std::function<void(double)> fixedUpdateDebugCollision{[&](double deltaTime) {
+            (void)deltaTime;
             ++frameCount;
+            if (frameCount & 1)
+            {
+                Vec2 newPos;
+                for (const std::shared_ptr<Pet>& pet : datas.pets)
+                {
+                    physicSystem.CatpureScreenCollision(*pet, datas.window->getSize(), newPos);
+                }
+            }
+        }};
 
+        const std::function<void(double)> renderUpdateDebugCollision{[&](double interpolation) {
+            (void)interpolation;
             // render
             datas.window->initDrawContext();
 
@@ -235,17 +247,7 @@ public:
                 datas.pFullScreenQuad->draw();
             }
 
-            // swap front and back buffers
             datas.window->renderFrame();
-
-            if (frameCount & 1)
-            {
-                Vec2 newPos;
-                for (const std::shared_ptr<Pet>& pet : datas.pets)
-                {
-                    physicSystem.CatpureScreenCollision(*pet, datas.window->getSize(), newPos);
-                }
-            }
         }};
 
         // fullscreen
@@ -264,7 +266,7 @@ public:
         TimeManager::instance().start();
         while (!datas.window->shouldClose())
         {
-            TimeManager::instance().update(unlimitedUpdate, limitedUpdateDebugCollision);
+            TimeManager::instance().update(unlimitedUpdate, fixedUpdateDebugCollision, renderUpdateDebugCollision);
         }
     }
 
@@ -310,12 +312,16 @@ public:
             }
         }};
 
-        const std::function<void(double)> limitedUpdate{[&](double deltaTime) {
+        const std::function<void(double)> fixedUpdate{[&](double deltaTime) {
             for (const std::shared_ptr<Pet>& pet : datas.pets)
             {
                 pet->updateRendering(deltaTime);
             }
+        }};
 
+        const std::function<void(double)> renderUpdate{[&](double interpolation) {
+            (void)interpolation;
+            const double fixedDelta = TimeManager::instance().getFixedDeltaTime();
             if (datas.shouldUpdateFrame)
             {
                 updateUI();
@@ -323,7 +329,7 @@ public:
                 // TODO: make generic class to avoid code repetition
                 if (datas.contextualMenu != nullptr)
                 {
-                    datas.contextualMenu->update(deltaTime);
+                    datas.contextualMenu->update(fixedDelta);
 
                     if (datas.contextualMenu->getShouldClose())
                         datas.contextualMenu = nullptr;
@@ -331,7 +337,7 @@ public:
 
                 if (datas.settingMenu != nullptr)
                 {
-                    datas.settingMenu->update(deltaTime);
+                    datas.settingMenu->update(fixedDelta);
 
                     if (datas.settingMenu->getShouldClose())
                         datas.settingMenu = nullptr;
@@ -339,7 +345,7 @@ public:
 
                 if (datas.updateMenu != nullptr)
                 {
-                    datas.updateMenu->update(deltaTime);
+                    datas.updateMenu->update(fixedDelta);
 
                     if (datas.updateMenu->getShouldClose())
                         datas.updateMenu = nullptr;
@@ -391,7 +397,7 @@ public:
         TimeManager::instance().start();
         while (!datas.window->shouldClose())
         {
-            TimeManager::instance().update(unlimitedUpdate, limitedUpdate);
+            TimeManager::instance().update(unlimitedUpdate, fixedUpdate, renderUpdate);
         }
     }
 };
