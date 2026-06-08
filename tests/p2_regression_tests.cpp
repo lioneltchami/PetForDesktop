@@ -447,7 +447,8 @@ bool test_cursor_normalization_for_mixed_scale()
 
     const Vec2 logicalWindowPos{1921.f, 24.f};
     const Vec2 logicalWindowSize{320.f, 180.f};
-    const Vec2 physicalWindowSize{static_cast<int>(logicalWindowSize.x * 1.25f), static_cast<int>(logicalWindowSize.y * 1.25f)};
+    const Vec2 physicalWindowSize{static_cast<float>(static_cast<int>(logicalWindowSize.x * 1.25f)),
+                                 static_cast<float>(static_cast<int>(logicalWindowSize.y * 1.25f))};
 
     auto normalize = [&](const Vec2& cursor) {
         return monitors.normalizeWindowCursor(cursor,

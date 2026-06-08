@@ -1025,6 +1025,8 @@ bool isChecksumValid(const std::filesystem::path& stagedFile, const UpdateMetada
     return true;
 }
 
+} // namespace
+
 bool Updater::validateMetadataEnvelope(const UpdateMetadata& metadata, std::string& error) const
 {
     return validateMetadataEnvelopeImpl(metadata, error);
@@ -1034,7 +1036,6 @@ bool Updater::verifySignedMetadata(const UpdateMetadata& metadata, std::string& 
 {
     return verifySignedMetadataImpl(metadata, error);
 }
-} // namespace
 
 bool Updater::isVersionAvailable(const std::string& currentTag, const std::string& remoteTag) const
 {

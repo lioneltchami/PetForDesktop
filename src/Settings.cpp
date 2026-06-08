@@ -92,6 +92,21 @@ enum class SettingFieldKind
     Text
 };
 
+bool isReasonableThemeName(const std::string& value);
+inline bool isAllowedSection(std::string_view sectionName);
+void addValidationIssue(Setting::ValidationReport& report, const std::string& filePath, const std::string& section,
+                       const std::string& field, const std::string& message, bool error);
+bool isSafeAsciiName(const std::string& value);
+bool isInRange(const float value, const float minimum, const float maximum);
+bool isInRange(const int value, const int minimum, const int maximum);
+template <typename T>
+bool readScalar(const YAML::Node& section, const char* key, T& value);
+template <size_t N>
+void warnUnknownKeys(const YAML::Node& section, std::string_view sectionName, const std::string& filePath,
+                    const std::array<std::string_view, N>& allowed, Setting::ValidationReport& report);
+void warnUnknownSections(const YAML::Node& root, const std::string& filePath, Setting::ValidationReport& report);
+bool getSection(const YAML::Node& root, const char* sectionName, YAML::Node& section);
+
 struct SettingFieldSpec
 {
     const std::string_view section;
