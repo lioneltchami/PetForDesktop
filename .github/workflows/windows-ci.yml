@@ -1,0 +1,43 @@
+name: Windows CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build_test_install:
+    name: Windows | Build, Test, Install
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure
+        run: cmake --preset ci-release
+
+      - name: Build
+        run: cmake --build --preset ci-release --verbose
+
+      - name: Test
+        run: ctest --preset ci-release --output-on-failure
+
+      - name: Install
+        run: cmake --install out/ci-release-modern --prefix out/install/windows
+
+      - name: Package
+        run: cpack --config out/ci-release-modern/CPackConfig.cmake -G ZIP
+
+      - name: Upload install tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-install-tree
+          path: out/install/windows
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-package
+          path: out/ci-release-modern/*.zip

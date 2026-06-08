@@ -4,7 +4,7 @@
   <a href="LICENSE">
     <img alt="License" src="https://img.shields.io/badge/License-MIT-blue.svg">
   </a>
-  <a href="https://github.com/Renardjojo/PetDesktop//releases/latest">
+  <a href="https://github.com/Renardjojo/PetForDesktop/releases/latest">
     <img alt="Version" src="https://img.shields.io/github/release/Renardjojo/PetForDesktop">
   </a>
   <a href="#LastActivity">
@@ -29,7 +29,20 @@ Welcome to PetForDesktop land!
 PetForDesktop allows you to integrate and interact with your pet and customize it whenever you want!  
 
 ## How to install?
-Just download the [lastest version](https://github.com/Renardjojo/PetDesktop//releases/latest) of this application and extract it.
+Just download the [latest version](https://github.com/Renardjojo/PetDesktop/releases/latest) of this application and extract it.
+
+## How to build?
+The repo now ships modern CMake presets and an install-first packaging flow.
+
+```bash
+cmake --preset x64-Release_ogl
+cmake --build --preset x64-Release_ogl
+ctest --preset x64-Release_ogl
+cmake --install out/x64-Release_ogl --prefix out/install/windows
+cpack --config out/x64-Release_ogl/CPackConfig.cmake -G ZIP
+```
+
+If you prefer dependency fetching instead of the bundled submodules, enable `PETFORDESKTOP_USE_FETCHCONTENT_DEPS=ON` or point CMake at a vcpkg manifest/toolchain. The repo also keeps `installer/petForDesktop.iss` as a legacy fallback installer while the Windows release chain moves toward signed package formats.
 
 ## What you can do with PetForDesktop:
 - Edge detection of screen content: your pet can jump into any element of your screen.
@@ -46,7 +59,7 @@ Just download the [lastest version](https://github.com/Renardjojo/PetDesktop//re
 ## What is currently not possible with PetForDesktop:
 - Cook and make your own coffee...
 - Launch multiple pets (you can but it is not optimized)
-- Works on MacOs and Linux...
+- Works on macOS and Linux...
 
 ## What in the future?
 You can easily check out the [roadmap](https://github.com/Renardjojo/PetForDesktop/milestones) but remember that this software is open source.  

@@ -1,0 +1,11 @@
+{
+  "name": "petfordesktop",
+  "version-string": "1.4.1",
+  "description": "PetForDesktop desktop companion application",
+  "homepage": "https://github.com/Renardjojo/PetDesktop",
+  "dependencies": [
+    "glfw3",
+    "yaml-cpp",
+    "cpr"
+  ]
+}

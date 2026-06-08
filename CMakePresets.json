@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 6,
   "cmakeMinimumRequired": {
     "major": 3,
     "minor": 19,
@@ -13,7 +13,9 @@
       "binaryDir": "${sourceDir}/out/x64-Debug_ogl",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "USE_OPENGL_API": "True"
+        "USE_OPENGL_API": "ON",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/windows",
+        "PETFORDESKTOP_USE_FETCHCONTENT_DEPS": "OFF"
       }
     },
     {
@@ -23,8 +25,56 @@
       "binaryDir": "${sourceDir}/out/x64-Release_ogl",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "USE_OPENGL_API": "True"
+        "USE_OPENGL_API": "ON",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/windows",
+        "PETFORDESKTOP_USE_FETCHCONTENT_DEPS": "OFF"
       }
+    },
+    {
+      "name": "ci-release",
+      "hidden": false,
+      "description": "Single-config release preset for CI, install staging, and packaging",
+      "binaryDir": "${sourceDir}/out/ci-release-modern",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "USE_OPENGL_API": "ON",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/windows",
+        "PETFORDESKTOP_USE_FETCHCONTENT_DEPS": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "x64-Debug_ogl",
+      "configurePreset": "x64-Debug_ogl",
+      "configuration": "Debug"
+    },
+    {
+      "name": "x64-Release_ogl",
+      "configurePreset": "x64-Release_ogl",
+      "configuration": "Release"
+    },
+    {
+      "name": "ci-release",
+      "configurePreset": "ci-release",
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "x64-Debug_ogl",
+      "configurePreset": "x64-Debug_ogl",
+      "configuration": "Debug"
+    },
+    {
+      "name": "x64-Release_ogl",
+      "configurePreset": "x64-Release_ogl",
+      "configuration": "Release"
+    },
+    {
+      "name": "ci-release",
+      "configurePreset": "ci-release",
+      "configuration": "Release"
     }
   ]
 }

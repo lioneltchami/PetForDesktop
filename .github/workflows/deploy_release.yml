@@ -32,10 +32,13 @@ jobs:
         run: cmake --preset=x64-Release_ogl
 
       - name: Build Project
-        run: cmake --build out/x64-Release_ogl --config Release --verbose
+        run: cmake --build --preset x64-Release_ogl --verbose
 
       - name: Run Tests
-        run: cd out/x64-Release_ogl && ctest -C Release -V
+        run: ctest --preset x64-Release_ogl -V
+
+      - name: Install Project
+        run: cmake --install out/x64-Release_ogl --prefix out/install/windows
 
       - name: Setup Binaries Artifact
         run: |
@@ -43,10 +46,7 @@ jobs:
           mkdir ${{env.BINARY_FOLDER}}/${{env.WIN64_FOLDER}}
           mkdir ${{env.BINARY_FOLDER}}/${{env.WIN64_FOLDER}}/${{env.PROJECT_NAME}}
 
-          mv out/x64-Release_ogl/Release/${{env.PROJECT_NAME}}.exe ${{env.BINARY_FOLDER}}/${{env.WIN64_FOLDER}}/${{env.PROJECT_NAME}}
-          mv content ${{env.BINARY_FOLDER}}/${{env.WIN64_FOLDER}}/${{env.PROJECT_NAME}}
-
-          mv README.md ${{env.BINARY_FOLDER}}/${{env.WIN64_FOLDER}}/${{env.PROJECT_NAME}}/
+          Copy-Item -Recurse -Force out/install/windows/* ${{env.BINARY_FOLDER}}/${{env.WIN64_FOLDER}}/${{env.PROJECT_NAME}}/
 
       - name: Upload Binaries Artifact
         uses: actions/upload-artifact@v2

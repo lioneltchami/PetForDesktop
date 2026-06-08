@@ -1,10 +1,8 @@
-# From https://gist.github.com/rokups/f771217b2d530d170db5cb1e08e9a8f4
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.19)
 
-########### Variables ############
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF) 
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(PROJECT_NAME "PetForDesktop")
 set(PROJECT_VERSION 1.4.1)
@@ -22,87 +20,82 @@ set(ABS_README_PATH "${CMAKE_SOURCE_DIR}/README.md")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_TRY_COMPILE_TARGET_TYPE "STATIC_LIBRARY")
 
-########### Create project ############
-project(${PROJECT_NAME} VERSION ${PROJECT_VERSION})
+project(${PROJECT_NAME} VERSION ${PROJECT_VERSION} LANGUAGES C CXX)
 message(STATUS "Project ${PROJECT_NAME} ${PROJECT_VERSION}")
 
-########### Setup ############
-# Set env variable
-if (CMAKE_BUILD_TYPE MATCHES Release)
-    message(STATUS "Generate CMake cache for Release")
-    if (WIN32)
-        set(SUB_SYS WIN32)
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
-    endif(WIN32)
-else ()
-    message(STATUS "Generate CMake cache for Debug")
-endif (CMAKE_BUILD_TYPE MATCHES Release)
+include(FetchContent)
+include(GNUInstallDirs)
 
-# Graphic API
 option(USE_OPENGL_API "Use OpenGL graphic api" FALSE)
+option(PETFORDESKTOP_USE_FETCHCONTENT_DEPS "Fetch dependencies when bundled submodules are unavailable" OFF)
 
 message(STATUS "USE_OPENGL_API: ${USE_OPENGL_API}")
+message(STATUS "PETFORDESKTOP_USE_FETCHCONTENT_DEPS: ${PETFORDESKTOP_USE_FETCHCONTENT_DEPS}")
 
-########### Build ############
+function(pet_resolve_target output_var)
+    foreach(candidate IN LISTS ARGN)
+        if(TARGET ${candidate})
+            set(${output_var} ${candidate} PARENT_SCOPE)
+            return()
+        endif()
+    endforeach()
+
+    message(FATAL_ERROR "Unable to resolve a dependency target for ${output_var}")
+endfunction()
+
+function(pet_add_dependency dep_name local_path git_repo git_tag)
+    if(EXISTS "${local_path}/CMakeLists.txt")
+        add_subdirectory("${local_path}" "${CMAKE_BINARY_DIR}/_deps/${dep_name}")
+        return()
+    endif()
+
+    if(PETFORDESKTOP_USE_FETCHCONTENT_DEPS)
+        FetchContent_Declare(
+            ${dep_name}
+            GIT_REPOSITORY ${git_repo}
+            GIT_TAG ${git_tag}
+            GIT_SHALLOW TRUE)
+        FetchContent_MakeAvailable(${dep_name})
+        return()
+    endif()
+
+    message(FATAL_ERROR
+        "Missing dependency '${dep_name}' at '${local_path}'. "
+        "Enable PETFORDESKTOP_USE_FETCHCONTENT_DEPS to fetch it explicitly.")
+endfunction()
+
 file(GLOB_RECURSE project_source_files LIST_DIRECTORIES false CONFIGURE_DEPENDS src/*.cpp src/*.c)
-
-file(GLOB_RECURSE project_headers  LIST_DIRECTORIES false CONFIGURE_DEPENDS include/*.hpp include/*.h)
+file(GLOB_RECURSE project_headers LIST_DIRECTORIES false CONFIGURE_DEPENDS include/*.hpp include/*.h)
 message(STATUS "Headers: ${project_headers}")
 message(STATUS "Sources : ${project_source_files}")
 
-# Set include directory
-include_directories("${ABS_INCLUDE_DIR}/")
-
-# Set icon
 if (WIN32)
     set(APP_ICON_RESOURCE "${CMAKE_CURRENT_SOURCE_DIR}/appicon.rc")
 endif ()
 
-# add the executable
-add_executable(${PROJECT_NAME} ${SUB_SYS} ${project_headers} ${project_source_files} ${APP_ICON_RESOURCE})
+add_executable(${PROJECT_NAME} ${APP_ICON_RESOURCE} ${project_headers} ${project_source_files})
+target_include_directories(${PROJECT_NAME} PRIVATE "${ABS_INCLUDE_DIR}" "${ABS_SRC_DIR}" "${ABS_DEPS_DIR}/imgui/imgui")
 
-########### Install setup ############
-# Setup install process
-install(TARGETS ${PROJECT_NAME} DESTINATION ${CMAKE_INSTALL_BINDIR}/)
-
-if (WIN32)
-  install(DIRECTORY ${REL_RESOURCES_DIR} DESTINATION ${CMAKE_INSTALL_DATADIR}/)
+if (WIN32 AND CMAKE_BUILD_TYPE MATCHES Release)
+    set(SUB_SYS WIN32)
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup")
 else()
-  install(DIRECTORY ${REL_RESOURCES_DIR} DESTINATION ${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR})
+    set(SUB_SYS "")
 endif()
 
-########### Deps ############
-# GLFW
-set (GLFW_BUILD_EXAMPLES OFF)
-set (GLFW_BUILD_TESTS OFF)
-set (GLFW_BUILD_DOCS OFF)
-set (GLFW_INSTALL OFF)
-add_subdirectory(${ABS_DEPS_DIR}/glfw)
-target_link_libraries(${PROJECT_NAME} glfw)
-
-# Graphic API
-if(USE_OPENGL_API)
-    find_package(OpenGL REQUIRED)
-    target_link_libraries(${PROJECT_NAME} ${OPENGL_LIBRARIES})
+if (SUB_SYS)
+    set_target_properties(${PROJECT_NAME} PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()
 
-# Boxer
-add_subdirectory(${ABS_DEPS_DIR}/Boxer)
-target_link_libraries(${PROJECT_NAME} Boxer)
+pet_add_dependency(glfw "${ABS_DEPS_DIR}/glfw" "https://github.com/glfw/glfw.git" "b00e6a8a88ad1b60c0a045e696301deb92c9a13e")
+pet_add_dependency(yaml-cpp "${ABS_DEPS_DIR}/yaml-cpp" "https://github.com/jbeder/yaml-cpp.git" "2decf96e915d2b0c26c68c1659665789dfef2633")
+set(CPR_CURL_USE_LIBPSL OFF CACHE BOOL "" FORCE)
+set(CPR_USE_SYSTEM_LIB_PSL OFF CACHE BOOL "" FORCE)
+pet_add_dependency(cpr "${ABS_DEPS_DIR}/cpr" "https://github.com/libcpr/cpr.git" "e3edc338eb74312b92186b93039e29bb04a6d4f8")
+pet_add_dependency(Boxer "${ABS_DEPS_DIR}/Boxer" "https://github.com/aaronmjacobs/Boxer.git" "5561c0fa1262f9b182a56cd0b06bcdca84a029a6")
 
-# yaml-cpp
-add_subdirectory(${ABS_DEPS_DIR}/yaml-cpp)
-target_link_libraries(${PROJECT_NAME} yaml-cpp)
-
-# cpr
-set(CURL_ZLIB OFF CACHE STRING "" FORCE)
-add_subdirectory(${ABS_DEPS_DIR}/cpr)
-target_link_libraries(${PROJECT_NAME} cpr)
-
-# imgui
 set(IMGUI_IMPL_OPENGL3 ON)
 set(IMGUI_IMPL_GLFW ON)
-
 set(IMGUI_EXAMPLES OFF)
 set(IMGUI_DEMO OFF)
 set(IMGUI_ENABLE_FREETYPE OFF)
@@ -118,17 +111,32 @@ set(IMGUI_IMPL_DX11 OFF)
 set(IMGUI_IMPL_DX12 OFF)
 set(IMGUI_IMPL_VULKAN OFF)
 add_subdirectory(${ABS_DEPS_DIR}/imgui)
-target_link_libraries(${PROJECT_NAME} imgui imgui-glfw imgui-opengl3)
 
-########### Define ############
+pet_resolve_target(PET_GLFW_TARGET glfw glfw3::glfw3)
+pet_resolve_target(PET_YAMLCPP_TARGET yaml-cpp yaml-cpp::yaml-cpp)
+pet_resolve_target(PET_CPR_TARGET cpr cpr::cpr)
+pet_resolve_target(PET_BOXER_TARGET Boxer Boxer::Boxer)
+
+set(PET_IMGUI_TARGETS imgui imgui-glfw imgui-opengl3)
+foreach(target_name IN LISTS PET_IMGUI_TARGETS)
+    if(NOT TARGET ${target_name})
+        message(FATAL_ERROR "Missing imgui target '${target_name}'. The bundled imgui wrapper is required.")
+    endif()
+endforeach()
+
+target_link_libraries(${PROJECT_NAME} PRIVATE ${PET_GLFW_TARGET} ${PET_BOXER_TARGET} ${PET_YAMLCPP_TARGET} ${PET_CPR_TARGET}
+                                              imgui imgui-glfw imgui-opengl3)
+
+if(USE_OPENGL_API)
+    find_package(OpenGL REQUIRED)
+    target_link_libraries(${PROJECT_NAME} PRIVATE ${OPENGL_LIBRARIES})
+endif()
+
 target_compile_definitions(${PROJECT_NAME} PRIVATE RESOURCE_PATH="${REL_RESOURCES_DIR}")
 target_compile_definitions(${PROJECT_NAME} PRIVATE PROJECT_NAME="${PROJECT_NAME}")
 target_compile_definitions(${PROJECT_NAME} PRIVATE PROJECT_VERSION="${PROJECT_VERSION}")
-
-
 target_compile_definitions(${PROJECT_NAME} PRIVATE IMGUI_DEFINE_MATH_OPERATORS)
 
-# Graphic API
 if(USE_OPENGL_API)
     target_compile_definitions(${PROJECT_NAME} PRIVATE SHADER_RESOURCE_PATH="${REL_RESOURCES_DIR}/shader/glsl")
     target_compile_definitions(${PROJECT_NAME} PRIVATE SHADER_VERTEX_EXT=".vs")
@@ -141,13 +149,33 @@ if (WIN32)
     target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX)
 endif ()
 
-
-########### Build link ############
-# Set a symbolic link so exe can find the /Data folder
 add_custom_target(copy_assets
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_LIST_DIR}/${REL_RESOURCES_DIR} ${CMAKE_CURRENT_BINARY_DIR}/${REL_RESOURCES_DIR}
 )
 add_dependencies(${PROJECT_NAME} copy_assets)
+
+install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(DIRECTORY ${REL_RESOURCES_DIR} DESTINATION ${CMAKE_INSTALL_DATADIR})
+install(FILES ${ABS_LICENSE_PATH} ${ABS_README_PATH} DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME})
+
+set(CPACK_PACKAGE_NAME ${PROJECT_NAME})
+set(CPACK_PACKAGE_VENDOR "Foxland")
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_PACKAGE_FILE_NAME "${PROJECT_NAME}-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "A fox companion like you've never dreamed")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY ${PROJECT_NAME})
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
+
+if(WIN32)
+    set(CPACK_GENERATOR "ZIP;NSIS")
+    set(CPACK_NSIS_DISPLAY_NAME ${PROJECT_NAME})
+    set(CPACK_NSIS_PACKAGE_NAME ${PROJECT_NAME})
+    set(CPACK_NSIS_URL_INFO_ABOUT "https://github.com/Renardjojo/PetDesktop")
+else()
+    set(CPACK_GENERATOR "ZIP;TGZ")
+endif()
+
+include(CPack)
 
 enable_testing()
 
@@ -160,10 +188,8 @@ add_executable(pet-p2-tests
     src/Updater.cpp
 )
 
-target_include_directories(pet-p2-tests PRIVATE ${ABS_INCLUDE_DIR} ${ABS_SRC_DIR})
-target_include_directories(pet-p2-tests PRIVATE ${ABS_DEPS_DIR}/imgui/imgui)
-
-target_link_libraries(pet-p2-tests PRIVATE Boxer yaml-cpp cpr glfw)
+target_include_directories(pet-p2-tests PRIVATE ${ABS_INCLUDE_DIR} ${ABS_SRC_DIR} ${ABS_DEPS_DIR}/imgui/imgui)
+target_link_libraries(pet-p2-tests PRIVATE ${PET_BOXER_TARGET} ${PET_YAMLCPP_TARGET} ${PET_CPR_TARGET} ${PET_GLFW_TARGET})
 
 target_compile_definitions(pet-p2-tests PRIVATE PET_P2_TESTS)
 target_compile_definitions(pet-p2-tests PRIVATE PROJECT_NAME="${PROJECT_NAME}")
