@@ -572,7 +572,7 @@ bool downloadToFile(const std::string& url, const std::filesystem::path& staging
     return true;
 }
 
-bool validateMetadataEnvelope(const UpdateMetadata& metadata, std::string& error)
+bool validateMetadataEnvelopeImpl(const UpdateMetadata& metadata, std::string& error)
 {
     if (!metadata.tag.empty() && metadata.tag.size() > 64u)
     {
@@ -684,7 +684,7 @@ bool validateMetadataEnvelope(const UpdateMetadata& metadata, std::string& error
     return true;
 }
 
-bool verifySignedMetadata(const UpdateMetadata& metadata, std::string& error)
+bool verifySignedMetadataImpl(const UpdateMetadata& metadata, std::string& error)
 {
     if (metadata.signature.empty())
         return true;
@@ -955,12 +955,12 @@ bool isChecksumValid(const std::filesystem::path& stagedFile, const UpdateMetada
 
 bool Updater::validateMetadataEnvelope(const UpdateMetadata& metadata, std::string& error) const
 {
-    return validateMetadataEnvelope(metadata, error);
+    return validateMetadataEnvelopeImpl(metadata, error);
 }
 
 bool Updater::verifySignedMetadata(const UpdateMetadata& metadata, std::string& error) const
 {
-    return verifySignedMetadata(metadata, error);
+    return verifySignedMetadataImpl(metadata, error);
 }
 } // namespace
 
@@ -1296,10 +1296,10 @@ bool Updater::parseManifestForTest(const std::string& manifestText, UpdateMetada
 
 bool Updater::validateMetadataEnvelopeForTest(const UpdateMetadata& metadata, std::string& error)
 {
-    return validateMetadataEnvelope(metadata, error);
+    return validateMetadataEnvelopeImpl(metadata, error);
 }
 
 bool Updater::verifySignedMetadataForTest(const UpdateMetadata& metadata, std::string& error)
 {
-    return verifySignedMetadata(metadata, error);
+    return verifySignedMetadataImpl(metadata, error);
 }

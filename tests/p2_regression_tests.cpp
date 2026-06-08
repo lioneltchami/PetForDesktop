@@ -430,6 +430,48 @@ bool test_update_metadata_validation()
 
     return true;
 }
+
+bool test_cursor_normalization_for_mixed_scale()
+{
+    auto monitorEnumerator = std::make_unique<FakeWindowEnumerator>();
+    monitorEnumerator->addMonitor({{0, 0}, {1920, 1080}, {400, 225}, {1.f, 1.f}});
+    monitorEnumerator->addMonitor({{1920, 0}, {1920, 1080}, {384, 216}, {1.25f, 1.25f}});
+    monitorEnumerator->addMonitor({{3840, 0}, {1536, 1536}, {307, 173}, {1.5f, 1.5f}});
+
+    Monitors monitors(std::move(monitorEnumerator));
+
+    const auto fail = [](const char* step) {
+        std::cout << "cursor_normalization fail: " << step << "\n";
+        return false;
+    };
+
+    const Vec2 logicalWindowPos{1921.f, 24.f};
+    const Vec2 logicalWindowSize{320.f, 180.f};
+    const Vec2 physicalWindowSize{static_cast<int>(logicalWindowSize.x * 1.25f), static_cast<int>(logicalWindowSize.y * 1.25f)};
+
+    auto normalize = [&](const Vec2& cursor) {
+        return monitors.normalizeWindowCursor(cursor,
+                                             {logicalWindowPos, logicalWindowSize, physicalWindowSize, 0.0001f, 0.0001f});
+    };
+
+    const Vec2 logicalInput{120.f, 40.f};
+    const Vec2 logicalResult = normalize(logicalInput);
+    if (!near(logicalResult.x, logicalInput.x) || !near(logicalResult.y, logicalInput.y))
+        return fail("logical passthrough");
+
+    const Vec2 physicalInput{logicalInput.x * 1.25f, logicalInput.y * 1.25f};
+    const Vec2 physicalResult = normalize(physicalInput);
+    if (!near(physicalResult.x, logicalInput.x) || !near(physicalResult.y, logicalInput.y))
+        return fail("physical to logical conversion");
+
+    // outside physical bounds but closest to logical should clamp/keep fallback path.
+    const Vec2 outsidePhysical{logicalWindowSize.x * 1.25f + 40.f, logicalWindowSize.y * 1.25f + 16.f};
+    const Vec2 outsideResult = normalize(outsidePhysical);
+    if (!std::isfinite(outsideResult.x) || !std::isfinite(outsideResult.y) || outsideResult.x < 0.f || outsideResult.y < 0.f)
+        return fail("outside cursor fallback");
+
+    return true;
+}
 } // namespace
 
 int main()
@@ -439,6 +481,7 @@ int main()
         {"monitor_fallback_and_selection", test_monitor_fallback_and_selection},
         {"settings_validation_hardening", test_settings_validation_hardening},
         {"update_metadata_validation", test_update_metadata_validation},
+        {"cursor_normalization_for_mixed_scale", test_cursor_normalization_for_mixed_scale},
     };
 
     int failed = 0;

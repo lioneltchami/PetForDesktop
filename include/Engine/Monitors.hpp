@@ -14,6 +14,15 @@
 class Monitors
 {
 public:
+    struct CursorTransformOptions
+    {
+        Vec2 windowLogicalPosition = Vec2::zero();
+        Vec2 windowLogicalSize     = Vec2::zero();
+        Vec2 windowPixelSize       = Vec2::zero();
+        float fallbackScaleX       = 0.0001f;
+        float fallbackScaleY       = 0.0001f;
+    };
+
     struct CoordinateAffineTransform
     {
         Vec2 scale = Vec2::one();
@@ -439,6 +448,61 @@ public:
         if (!m_enumerator)
             return Vec2i::zero();
         return m_enumerator->getMonitorPhysicalSize();
+    }
+
+    Vec2 normalizeWindowCursor(const Vec2& cursorPos, const CursorTransformOptions& options) const
+    {
+        const Vec2 logicalSize = options.windowLogicalSize;
+        if (logicalSize.x <= 0.f || logicalSize.y <= 0.f)
+            return cursorPos;
+
+        const auto isInsideRect = [](const Vec2& point, const Vec2& size) {
+            return point.x >= 0.f && point.y >= 0.f && point.x <= size.x && point.y <= size.y;
+        };
+
+        auto pointToRectDistanceSq = [](const Vec2& point, const Vec2& size) {
+            const float clampedX = std::min(std::max(point.x, 0.f), size.x);
+            const float clampedY = std::min(std::max(point.y, 0.f), size.y);
+            const float dx      = point.x - clampedX;
+            const float dy      = point.y - clampedY;
+            return dx * dx + dy * dy;
+        };
+
+        const bool logicalInside = isInsideRect(cursorPos, logicalSize);
+        if (logicalInside && options.windowPixelSize.x <= 0.f && options.windowPixelSize.y <= 0.f)
+            return cursorPos;
+
+        const auto monitor = getMonitorTransformForLogicalPoint(options.windowLogicalPosition);
+        if (!monitor)
+            return cursorPos;
+
+        const Vec2 scale = {
+            std::max(std::abs(monitor->contentScale.x), options.fallbackScaleX),
+            std::max(std::abs(monitor->contentScale.y), options.fallbackScaleY)};
+        const Vec2 inferredPixelSize = {
+            options.windowPixelSize.x > 0.f ? options.windowPixelSize.x : logicalSize.x * scale.x,
+            options.windowPixelSize.y > 0.f ? options.windowPixelSize.y : logicalSize.y * scale.y};
+
+        const bool pixelInside = isInsideRect(cursorPos, inferredPixelSize);
+        const Vec2 originInPixel = monitor->logicalToPhysical(options.windowLogicalPosition);
+        const Vec2 cursorFromPixel = monitor->physicalToLogical(originInPixel + cursorPos) - options.windowLogicalPosition;
+        const bool pixelMappedInside = isInsideRect(cursorFromPixel, logicalSize);
+
+        if (!logicalInside && pixelInside && pixelMappedInside)
+            return cursorFromPixel;
+
+        if (logicalInside && (!pixelInside || !pixelMappedInside))
+            return cursorPos;
+
+        if (!logicalInside && !pixelInside)
+        {
+            const float logicalDistance = pointToRectDistanceSq(cursorPos, logicalSize);
+            const float pixelDistance  = pointToRectDistanceSq(cursorFromPixel, logicalSize);
+            if (pixelDistance < logicalDistance)
+                return cursorFromPixel;
+        }
+
+        return cursorPos;
     }
 
     Vec2i getMonitorPhysicalSize(int index) const

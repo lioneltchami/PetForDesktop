@@ -15,54 +15,23 @@ std::atomic<Monitors*> g_windowMonitors{nullptr};
 
 Vec2 normalizeWindowCursorToLogical(GLFWwindow* window, const double x, const double y)
 {
-    Vec2 cursorPosition{static_cast<float>(x), static_cast<float>(y)};
+    GameData& datas = *static_cast<GameData*>(glfwGetWindowUserPointer(window));
+    const Vec2 cursor{static_cast<float>(x), static_cast<float>(y)};
 
-    int logicalWidth  = 0;
-    int logicalHeight = 0;
     int pixelWidth    = 0;
     int pixelHeight   = 0;
-    glfwGetWindowSize(window, &logicalWidth, &logicalHeight);
+    const int logicalWidth  = static_cast<int>(datas.window->getSize().x);
+    const int logicalHeight = static_cast<int>(datas.window->getSize().y);
     glfwGetFramebufferSize(window, &pixelWidth, &pixelHeight);
 
-    const auto isInsideRect = [](const Vec2& point, const float width, const float height) {
-        return point.x >= 0.f && point.y >= 0.f && point.x <= width && point.y <= height;
-    };
+    const Monitors::CursorTransformOptions options{
+        .windowLogicalPosition = datas.window->getPosition(),
+        .windowLogicalSize = Vec2{static_cast<float>(logicalWidth), static_cast<float>(logicalHeight)},
+        .windowPixelSize = Vec2{static_cast<float>(pixelWidth), static_cast<float>(pixelHeight)},
+        .fallbackScaleX = 0.0001f,
+        .fallbackScaleY = 0.0001f};
 
-    const bool logicalRange = isInsideRect(cursorPosition,
-                                          static_cast<float>(logicalWidth),
-                                          static_cast<float>(logicalHeight));
-    if (logicalRange)
-        return cursorPosition;
-
-    if (logicalWidth <= 0 || logicalHeight <= 0)
-        return cursorPosition;
-
-    const float scaleX = static_cast<float>(pixelWidth) / static_cast<float>(logicalWidth);
-    const float scaleY = static_cast<float>(pixelHeight) / static_cast<float>(logicalHeight);
-    if (std::isfinite(scaleX) && std::isfinite(scaleY) && scaleX > 0.f && scaleY > 0.f)
-    {
-        const float safeScaleX = std::max(scaleX, 0.0001f);
-        const float safeScaleY = std::max(scaleY, 0.0001f);
-        const Vec2 physicalCandidate = {cursorPosition.x / safeScaleX, cursorPosition.y / safeScaleY};
-        if (isInsideRect(physicalCandidate,
-                         static_cast<float>(logicalWidth),
-                         static_cast<float>(logicalHeight)))
-        {
-            return physicalCandidate;
-        }
-    }
-
-    const bool physicalRange = isInsideRect(cursorPosition, static_cast<float>(pixelWidth), static_cast<float>(pixelHeight));
-    if (physicalRange)
-    {
-        const float safeScaleX = std::max(std::abs(scaleX), 0.0001f);
-        const float safeScaleY = std::max(std::abs(scaleY), 0.0001f);
-        return {cursorPosition.x / safeScaleX, cursorPosition.y / safeScaleY};
-    }
-
-    const float safeScaleX = std::max(std::abs(scaleX), 0.0001f);
-    const float safeScaleY = std::max(std::abs(scaleY), 0.0001f);
-    return {cursorPosition.x / safeScaleX, cursorPosition.y / safeScaleY};
+    return datas.monitors.normalizeWindowCursor(cursor, options);
 }
 
 void glfwMonitorConnectionCallback(GLFWmonitor* monitor, int event)
