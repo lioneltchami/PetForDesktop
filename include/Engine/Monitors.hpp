@@ -77,8 +77,9 @@ public:
         size     = Vec2i::zero();
         std::lock_guard lock{m_mutex};
         if (!m_enumerator)
-            return;
+            return Vec2i::zero();
         m_enumerator->getMainMonitorWorkingArea(position, size);
+        return position;
     }
 
     Vec2i getMonitorsSize() const
