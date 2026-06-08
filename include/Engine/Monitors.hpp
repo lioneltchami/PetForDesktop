@@ -450,6 +450,24 @@ public:
         return m_enumerator->getMonitorPhysicalSize();
     }
 
+    template <typename Fn>
+    void forEachMonitorTransform(Fn&& callback) const
+    {
+        std::lock_guard lock{m_mutex};
+        if (!m_enumerator)
+            return;
+
+        const int monitorCount = m_enumerator->getMonitorsCount();
+        for (int index = 0; index < monitorCount; ++index)
+        {
+            MonitorTransform transform;
+            if (!buildMonitorTransform(index, transform))
+                continue;
+
+            callback(transform);
+        }
+    }
+
     Vec2 normalizeWindowCursor(const Vec2& cursorPos, const CursorTransformOptions& options) const
     {
         const Vec2 logicalSize = options.windowLogicalSize;
@@ -460,7 +478,7 @@ public:
             return point.x >= 0.f && point.y >= 0.f && point.x <= size.x && point.y <= size.y;
         };
 
-        auto pointToRectDistanceSq = [](const Vec2& point, const Vec2& size) {
+        const auto pointToRectDistanceSq = [](const Vec2& point, const Vec2& size) {
             const float clampedX = std::min(std::max(point.x, 0.f), size.x);
             const float clampedY = std::min(std::max(point.y, 0.f), size.y);
             const float dx      = point.x - clampedX;
@@ -472,34 +490,49 @@ public:
         if (logicalInside && options.windowPixelSize.x <= 0.f && options.windowPixelSize.y <= 0.f)
             return cursorPos;
 
-        const auto monitor = getMonitorTransformForLogicalPoint(options.windowLogicalPosition);
-        if (!monitor)
-            return cursorPos;
-
-        const Vec2 scale = {
-            std::max(std::abs(monitor->contentScale.x), options.fallbackScaleX),
-            std::max(std::abs(monitor->contentScale.y), options.fallbackScaleY)};
         const Vec2 inferredPixelSize = {
-            options.windowPixelSize.x > 0.f ? options.windowPixelSize.x : logicalSize.x * scale.x,
-            options.windowPixelSize.y > 0.f ? options.windowPixelSize.y : logicalSize.y * scale.y};
+            options.windowPixelSize.x > 0.f ? static_cast<float>(options.windowPixelSize.x) : logicalSize.x,
+            options.windowPixelSize.y > 0.f ? static_cast<float>(options.windowPixelSize.y) : logicalSize.y};
 
-        const bool pixelInside = isInsideRect(cursorPos, inferredPixelSize);
-        const Vec2 originInPixel = monitor->logicalToPhysical(options.windowLogicalPosition);
-        const Vec2 cursorFromPixel = monitor->physicalToLogical(originInPixel + cursorPos) - options.windowLogicalPosition;
-        const bool pixelMappedInside = isInsideRect(cursorFromPixel, logicalSize);
-
-        if (!logicalInside && pixelInside && pixelMappedInside)
-            return cursorFromPixel;
-
-        if (logicalInside && (!pixelInside || !pixelMappedInside))
+        const bool cursorLooksPhysical = !logicalInside || (options.windowPixelSize.x > 0.f && options.windowPixelSize.y > 0.f);
+        const bool cursorInsidePhysical = isInsideRect(cursorPos, inferredPixelSize);
+        if (!cursorLooksPhysical && !cursorInsidePhysical)
             return cursorPos;
 
-        if (!logicalInside && !pixelInside)
+        Vec2 cursorBest = cursorPos;
+        float bestDistance = std::numeric_limits<float>::infinity();
+        bool foundCandidate = false;
+
+        forEachMonitorTransform([&](const MonitorTransform& monitor) {
+            const Vec2 originInPixel = monitor.logicalToPhysical(options.windowLogicalPosition);
+            const Vec2 cursorFromPixel = monitor.physicalToLogical(originInPixel + cursorPos) - options.windowLogicalPosition;
+
+            const bool inside = isInsideRect(cursorFromPixel, logicalSize);
+            if (inside)
+            {
+                cursorBest = cursorFromPixel;
+                foundCandidate = true;
+                bestDistance = 0.f;
+                return;
+            }
+
+            const float candidateDistance = pointToRectDistanceSq(cursorFromPixel, logicalSize);
+            if (candidateDistance < bestDistance)
+            {
+                bestDistance = candidateDistance;
+                cursorBest = cursorFromPixel;
+            }
+        });
+
+        if (foundCandidate)
+            return cursorBest;
+
+        if (!logicalInside)
         {
             const float logicalDistance = pointToRectDistanceSq(cursorPos, logicalSize);
-            const float pixelDistance  = pointToRectDistanceSq(cursorFromPixel, logicalSize);
-            if (pixelDistance < logicalDistance)
-                return cursorFromPixel;
+            const float fallbackDistance = pointToRectDistanceSq(cursorBest, logicalSize);
+            if (fallbackDistance < logicalDistance)
+                return cursorBest;
         }
 
         return cursorPos;

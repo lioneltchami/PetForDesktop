@@ -71,6 +71,14 @@ void UpdateMenu::update(double deltaTime)
         ImGui::TextColored(ImVec4(1.f, 0.3f, 0.3f, 1.f), "Invalid update metadata: %s", m_metadataError.c_str());
     }
 
+    const bool canInstall = m_isMetadataValid && !m_metadata.packageUrl.empty() &&
+                           (m_metadata.packageSize == 0 || m_metadata.packageSize <= 300u * 1024u * 1024u) &&
+                           !m_metadata.packageName.empty();
+    if (!canInstall)
+    {
+        ImGui::TextColored(ImVec4(1.f, 0.7f, 0.2f, 1.f), "Update blocked: package metadata is incomplete or untrusted.");
+    }
+
     if (!changelog.empty())
     {
         ImGui::Separator();
@@ -92,7 +100,7 @@ void UpdateMenu::update(double deltaTime)
 
     ImGui::Separator();
 
-    if (!m_isMetadataValid)
+    if (!canInstall)
         ImGui::BeginDisabled();
 
     if (ImGui::Button("Update", ImVec2(ImGui::GetContentRegionAvail().x, 0.f)))

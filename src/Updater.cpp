@@ -30,8 +30,24 @@ constexpr std::size_t kMaxReleaseNotesBytes = 1024u * 1024u; // 1MB
 constexpr std::size_t kMaxAssetUrlLength = 4096;
 constexpr std::size_t kMaxMetadataTextBytes = 128u * 1024u;
 constexpr std::size_t kManifestMaxPackageNameLength = 255u;
+constexpr std::size_t kManifestMinChecksumLength = 32u;
+constexpr std::size_t kManifestMaxChecksumLength = 64u;
 constexpr std::array<const char*, 4> kTrustedUpdateHosts = {"github.com", "api.github.com", "objects.githubusercontent.com",
                                                            "github-releases.githubusercontent.com"};
+
+bool containsPathTraversal(std::string_view value)
+{
+    for (const char c : value)
+    {
+        if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' ||
+            c == '|' )
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
 
 struct Version
 {
@@ -351,6 +367,39 @@ std::string sanitizeFileName(std::string value)
     return value;
 }
 
+std::string sanitizeMetadataText(std::string value)
+{
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())))
+        value.erase(value.begin());
+
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())))
+        value.pop_back();
+
+    if (value.size() > kManifestMaxPackageNameLength)
+        value.resize(kManifestMaxPackageNameLength);
+
+    return value;
+}
+
+std::string normalizeHexToken(std::string value)
+{
+    value.erase(std::remove_if(value.begin(), value.end(), [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }),
+                value.end());
+
+    for (auto& c : value)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    return value;
+}
+
+bool isValidHexTokenLength(std::string_view value)
+{
+    if (value.size() < kManifestMinChecksumLength || value.size() > kManifestMaxChecksumLength)
+        return false;
+
+    return std::all_of(value.begin(), value.end(), [](unsigned char c) { return std::isxdigit(c); });
+}
+
 bool parseAssetList(const std::string& releaseJson, std::vector<UpdateAssetMetadata>& assets)
 {
     const auto assetsPos = releaseJson.find("\"assets\"");
@@ -434,15 +483,16 @@ bool parseManifestFromText(const std::string& manifestText, UpdateMetadata& meta
 
     std::string value;
     auto parsePackageField = [&](const std::string& fieldValue) -> bool {
-        if (fieldValue.empty())
+        const std::string parsedValue = sanitizeMetadataText(fieldValue);
+        if (parsedValue.empty())
             return false;
 
         packageFieldPresent = true;
-        if (!isHttpsUrl(fieldValue))
+        if (!isHttpsUrl(parsedValue))
             return false;
 
-        metadata.packageUrl = fieldValue;
-        metadata.packageName = extractFilenameFromUrl(fieldValue);
+        metadata.packageUrl = parsedValue;
+        metadata.packageName = extractFilenameFromUrl(parsedValue);
         if (metadata.packageName.size() > kManifestMaxPackageNameLength)
             metadata.packageName = metadata.packageName.substr(0, kManifestMaxPackageNameLength);
 
@@ -467,31 +517,32 @@ bool parseManifestFromText(const std::string& manifestText, UpdateMetadata& meta
 
     if (parseJsonStringField(manifestText, "checksum", value) || parseJsonStringField(manifestText, "sha256", value))
     {
-        if (!value.empty())
+        const std::string normalizedChecksum = normalizeHexToken(value);
+        if (!normalizedChecksum.empty())
         {
-            metadata.checksum = value;
+            metadata.checksum = normalizedChecksum;
             hasAny         = true;
         }
     }
 
     if (parseJsonStringField(manifestText, "signature", value))
     {
-        metadata.signature = value;
+        metadata.signature = normalizeHexToken(sanitizeMetadataText(value));
     }
 
     if (parseJsonStringField(manifestText, "signature_algorithm", value))
     {
-        metadata.signatureAlgorithm = toLowerAscii(value);
+        metadata.signatureAlgorithm = toLowerAscii(sanitizeMetadataText(value));
     }
 
     if (parseJsonStringField(manifestText, "signature_public_key", value))
     {
-        metadata.signaturePublicKey = value;
+        metadata.signaturePublicKey = sanitizeMetadataText(value);
     }
 
     if (parseJsonStringField(manifestText, "checksum_algorithm", value))
     {
-        metadata.checksumAlgorithm = toLowerAscii(value);
+        metadata.checksumAlgorithm = toLowerAscii(sanitizeMetadataText(value));
         if (metadata.checksum.empty())
             metadata.checksumAlgorithm.clear();
     }
@@ -598,24 +649,39 @@ bool validateMetadataEnvelopeImpl(const UpdateMetadata& metadata, std::string& e
         return false;
     }
 
+    if (!metadata.packageUrl.empty() && !isHttpsUrl(metadata.packageUrl))
+    {
+        error = "Package URL failed HTTPS/host validation";
+        return false;
+    }
+
     if (metadata.packageName.size() > kManifestMaxPackageNameLength)
     {
         error = "Metadata package name is too long";
         return false;
     }
 
-    if (metadata.packageSize > kMaxDownloadBytes)
+    if (containsPathTraversal(metadata.packageName))
+    {
+        error = "Metadata package name contains invalid path characters";
+        return false;
+    }
+
+    if (metadata.packageSize > 0 && metadata.packageSize > kMaxDownloadBytes)
     {
         error = "Manifest package size exceeds policy";
+        return false;
+    }
+
+    if (!metadata.checksum.empty() && !isValidHexTokenLength(metadata.checksum))
+    {
+        error = "Checksum length or format is invalid";
         return false;
     }
 
     if (!metadata.checksum.empty())
     {
         const std::string checksumAlgorithm = toLowerAscii(metadata.checksumAlgorithm);
-        std::string checksum = metadata.checksum;
-        checksum.erase(std::remove_if(checksum.begin(), checksum.end(), [](char c) { return c == ' ' || c == '\t'; }),
-                      checksum.end());
         if (checksumAlgorithm.empty())
         {
             error = "Checksum algorithm missing";
@@ -628,13 +694,7 @@ bool validateMetadataEnvelopeImpl(const UpdateMetadata& metadata, std::string& e
             return false;
         }
 
-        if (checksum.size() != 64)
-        {
-            error = "Unexpected checksum length";
-            return false;
-        }
-
-        if (!isValidHexDigest(checksum))
+        if (!isValidHexDigest(metadata.checksum))
         {
             error = "Checksum contains non-hex characters";
             return false;
@@ -681,6 +741,12 @@ bool validateMetadataEnvelopeImpl(const UpdateMetadata& metadata, std::string& e
         }
     }
 
+    if (metadata.signature.empty() && metadata.signatureAlgorithm.size() > 0)
+    {
+        error = "Signature algorithm set without signature";
+        return false;
+    }
+
     return true;
 }
 
@@ -688,6 +754,12 @@ bool verifySignedMetadataImpl(const UpdateMetadata& metadata, std::string& error
 {
     if (metadata.signature.empty())
         return true;
+
+    if (metadata.signatureAlgorithm.empty())
+    {
+        error = "Signature algorithm is required";
+        return false;
+    }
 
     if (metadata.signatureAlgorithm == "sha256")
     {
@@ -1043,6 +1115,24 @@ bool Updater::resolvePlatformPackage(const UpdateMetadata& metadata, UpdateMetad
         resolved           = metadata;
         resolved.packageUrl = metadata.packageUrl;
         resolved.packageName = sanitizeFileName(!metadata.packageName.empty() ? metadata.packageName : extractFilenameFromUrl(metadata.packageUrl));
+        if (containsPathTraversal(resolved.packageName))
+        {
+            error = "Manifest package name has unsafe path characters";
+            return false;
+        }
+
+        if (!isHttpsUrl(resolved.packageUrl))
+        {
+            error = "Manifest package URL failed trust validation";
+            return false;
+        }
+
+        if (metadata.packageSize > 0 && metadata.packageSize > kMaxDownloadBytes)
+        {
+            error = "Manifest package exceeds download limit";
+            return false;
+        }
+
         if (resolved.packageUrl.empty())
         {
             error = "Manifest package URL is empty";
@@ -1061,10 +1151,19 @@ bool Updater::resolvePlatformPackage(const UpdateMetadata& metadata, UpdateMetad
         if (lower.find(".exe") == std::string::npos)
             continue;
 
+        if (asset.sizeBytes > kMaxDownloadBytes)
+            continue;
+
+        const auto safeName = sanitizeFileName(asset.name);
+        if (containsPathTraversal(safeName) || safeName.empty())
+            continue;
+
         if (!isHttpsUrl(asset.downloadUrl))
             continue;
 
-        candidates.emplace_back(asset);
+        UpdateAssetMetadata safeAsset = asset;
+        safeAsset.name = safeName;
+        candidates.emplace_back(std::move(safeAsset));
     }
 
     if (candidates.empty())
@@ -1090,6 +1189,24 @@ bool Updater::resolvePlatformPackage(const UpdateMetadata& metadata, UpdateMetad
     else
         selected = &candidates.front();
 
+    if (!selected)
+    {
+        error = "No candidate package was selected";
+        return false;
+    }
+
+    if (!isHttpsUrl(selected->downloadUrl))
+    {
+        error = "Selected asset URL is not trusted";
+        return false;
+    }
+
+    if (selected->sizeBytes > kMaxDownloadBytes)
+    {
+        error = "Selected asset exceeds download limit";
+        return false;
+    }
+
     resolved = metadata;
     resolved.packageUrl = selected->downloadUrl;
     resolved.packageName = sanitizeFileName(selected->name);
@@ -1108,6 +1225,18 @@ bool Updater::downloadAndStageUpdate(const UpdateMetadata& metadata, std::filesy
                                     std::string& error) const
 {
     const auto stageDir = std::filesystem::temp_directory_path();
+
+    if (metadata.packageUrl.empty() || !isHttpsUrl(metadata.packageUrl))
+    {
+        error = "Package URL is missing or untrusted";
+        return false;
+    }
+
+    if (metadata.packageName.empty())
+    {
+        error = "Package name is empty";
+        return false;
+    }
 
     const std::string fileName = metadata.packageName.empty() ? std::string("PetForDesktop-Update.bin") : metadata.packageName;
     const auto        safeName = sanitizeFileName(fileName);

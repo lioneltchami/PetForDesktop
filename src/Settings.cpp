@@ -11,6 +11,7 @@
 #include <errno.h>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <system_error>
 #include <stdexcept>
@@ -80,6 +81,170 @@ constexpr std::array<std::string_view, 5> kWindowSectionKeys = {"FullScreenWindo
 constexpr std::array<std::string_view, 1> kStyleSectionKeys = {"Theme"};
 constexpr std::array<std::string_view, 2> kAccessibilitySectionKeys = {"Scale", "TextScale"};
 constexpr std::array<std::string_view, 1> kDebugSectionKeys = {"ShowEdgeDetection"};
+
+constexpr std::string_view kDefaultStyleName = "PetForDesktop";
+
+enum class SettingFieldKind
+{
+    Int,
+    Float,
+    Bool,
+    Text
+};
+
+struct SettingFieldSpec
+{
+    const std::string_view section;
+    const std::string_view key;
+    SettingFieldKind      kind = SettingFieldKind::Text;
+    bool                  required = false;
+    float                 minValue = 0.f;
+    float                 maxValue = 0.f;
+    std::size_t           maxTextLength = 0;
+};
+
+constexpr std::array<SettingFieldSpec, 23> kSettingFieldSchema = {
+    SettingFieldSpec{"Game", "FPS", SettingFieldKind::Int, false, static_cast<float>(kMinFPS), static_cast<float>(kMaxFPS), 0},
+    SettingFieldSpec{"Game", "RandomSeed", SettingFieldKind::Int, false,
+                     std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max(), 0},
+
+    SettingFieldSpec{"Physic", "PhysicFrameRate", SettingFieldKind::Int, false, static_cast<float>(kMinPhysicsFrameRate),
+                     static_cast<float>(kMaxPhysicsFrameRate), 0},
+    SettingFieldSpec{"Physic", "Bounciness", SettingFieldKind::Float, false, kMinBounciness, kMaxBounciness, 0},
+    SettingFieldSpec{"Physic", "GravityX", SettingFieldKind::Float, false, kMinGravity, kMaxGravity, 0},
+    SettingFieldSpec{"Physic", "GravityY", SettingFieldKind::Float, false, kMinGravity, kMaxGravity, 0},
+    SettingFieldSpec{"Physic", "Friction", SettingFieldKind::Float, false, kMinFriction, kMaxFriction, 0},
+    SettingFieldSpec{"Physic", "ContinuousCollisionMaxVelocity", SettingFieldKind::Float, false,
+                     kMinContinuousCollisionMaxVelocity, kMaxContinuousCollisionMaxVelocity, 0},
+    SettingFieldSpec{"Physic", "FootBasementWidth", SettingFieldKind::Int, false, static_cast<float>(kMinFootBasement),
+                     static_cast<float>(kMaxFootBasement), 0},
+    SettingFieldSpec{"Physic", "FootBasementHeight", SettingFieldKind::Int, false, static_cast<float>(kMinFootBasement),
+                     static_cast<float>(kMaxFootBasement), 0},
+    SettingFieldSpec{"Physic", "CollisionPixelRatioStopMovement", SettingFieldKind::Float, false, kMinCollisionRatio,
+                     kMaxCollisionRatio, 0},
+    SettingFieldSpec{"Physic", "IsGroundedDetection", SettingFieldKind::Float, false, 0.0001f, kMaxIsGroundedDetection, 0},
+    SettingFieldSpec{"Physic", "InputReleaseImpulse", SettingFieldKind::Float, false, kMinPositiveFloat, kMaxReleaseImpulse, 0},
+
+    SettingFieldSpec{"GamePlay", "CoyoteTimeCursorMovement", SettingFieldKind::Float, false, 0.0001f, kMaxCoyoteTime, 0},
+
+    SettingFieldSpec{"Window", "FullScreenWindow", SettingFieldKind::Bool, false, 0.f, 0.f, 0},
+    SettingFieldSpec{"Window", "ShowWindow", SettingFieldKind::Bool, false, 0.f, 0.f, 0},
+    SettingFieldSpec{"Window", "ShowFrameBufferBackground", SettingFieldKind::Bool, false, 0.f, 0.f, 0},
+    SettingFieldSpec{"Window", "UseForwardWindow", SettingFieldKind::Bool, false, 0.f, 0.f, 0},
+    SettingFieldSpec{"Window", "UseMousePassThoughWindow", SettingFieldKind::Bool, false, 0.f, 0.f, 0},
+
+    SettingFieldSpec{"Style", "Theme", SettingFieldKind::Text, false, 0.f, 0.f, kMaxThemeNameLength},
+
+    SettingFieldSpec{"Accessibility", "Scale", SettingFieldKind::Int, false, static_cast<float>(kMinScale),
+                     static_cast<float>(kMaxScale), 0},
+    SettingFieldSpec{"Accessibility", "TextScale", SettingFieldKind::Float, false, kMinTextScale, kMaxTextScale, 0},
+
+    SettingFieldSpec{"Debug", "ShowEdgeDetection", SettingFieldKind::Bool, false, 0.f, 0.f, 0}
+};
+
+const SettingFieldSpec* findSettingSpec(std::string_view section, std::string_view key)
+{
+    for (const auto& spec : kSettingFieldSchema)
+    {
+        if (spec.section == section && spec.key == key)
+            return &spec;
+    }
+
+    return nullptr;
+}
+
+void validateSettingValueWithSpec(const YAML::Node& section, const SettingFieldSpec& spec, const std::string& filePath,
+                                 const std::string& sectionName, const std::string& key, Setting::ValidationReport& report)
+{
+    const YAML::Node entry = section[key];
+    if (!entry)
+    {
+        if (spec.required)
+            addValidationIssue(report, filePath, sectionName, std::string(spec.key), "Missing required setting value", true);
+
+        return;
+    }
+
+    if (!entry.IsScalar())
+    {
+        addValidationIssue(report, filePath, sectionName, std::string(spec.key), "Non-scalar setting value", true);
+        return;
+    }
+
+    switch (spec.kind)
+    {
+    case SettingFieldKind::Int: {
+        int value = 0;
+        if (!readScalar(section, spec.key.data(), value))
+        {
+            addValidationIssue(report, filePath, sectionName, std::string(spec.key), "Invalid integer setting value", true);
+            return;
+        }
+
+        if (!std::isfinite(static_cast<float>(value)) || !isInRange(static_cast<float>(value), spec.minValue, spec.maxValue))
+            addValidationIssue(report, filePath, sectionName, std::string(spec.key), "Integer value out of range", true);
+        break;
+    }
+    case SettingFieldKind::Float: {
+        float value = 0.f;
+        if (!readScalar(section, spec.key.data(), value))
+        {
+            addValidationIssue(report, filePath, sectionName, std::string(spec.key), "Invalid floating setting value", true);
+            return;
+        }
+
+        if (!std::isfinite(value) || !isInRange(value, spec.minValue, spec.maxValue))
+            addValidationIssue(report, filePath, sectionName, std::string(spec.key), "Float value out of range", true);
+        break;
+    }
+    case SettingFieldKind::Bool: {
+        bool value = false;
+        if (!readScalar(section, spec.key.data(), value))
+        {
+            addValidationIssue(report, filePath, sectionName, std::string(spec.key), "Invalid boolean setting value", true);
+            return;
+        }
+        (void)value;
+        break;
+    }
+    case SettingFieldKind::Text: {
+        std::string value;
+        if (!readScalar(section, spec.key.data(), value))
+        {
+            addValidationIssue(report, filePath, sectionName, std::string(spec.key), "Invalid theme value type", true);
+            return;
+        }
+
+        if (value.empty() || value.size() > spec.maxTextLength || !isSafeAsciiName(value) || !isReasonableThemeName(value))
+            addValidationIssue(report, filePath, sectionName, std::string(spec.key), "Invalid text value", true);
+        break;
+    }
+    }
+}
+
+void validateSettingSchema(const YAML::Node& root, const std::string& filePath, Setting::ValidationReport& report)
+{
+    for (const auto& spec : kSettingFieldSchema)
+    {
+        YAML::Node section;
+        const bool hasSection = getSection(root, std::string(spec.section).c_str(), section);
+        if (!hasSection)
+        {
+            if (spec.required)
+                addValidationIssue(report, filePath, std::string(spec.section), std::string(), "Missing required settings section", true);
+
+            continue;
+        }
+
+        if (!section.IsMap())
+        {
+            addValidationIssue(report, filePath, std::string(spec.section), std::string(), "Invalid section format", true);
+            continue;
+        }
+
+        validateSettingValueWithSpec(section, spec, filePath, std::string(spec.section), std::string(spec.key), report);
+    }
+}
 
 bool isReasonableThemeName(const std::string& value)
 {
@@ -344,8 +509,8 @@ void clampAndNormalize(GameData& data)
     data.releaseImpulse      = std::clamp(data.releaseImpulse, kMinPositiveFloat, kMaxReleaseImpulse);
     data.coyoteTimeCursorPos = std::clamp(data.coyoteTimeCursorPos, kMinPositiveFloat, kMaxCoyoteTime);
 
-    if (data.styleName.empty())
-        data.styleName = "PetForDesktop";
+    if (!isReasonableThemeName(data.styleName) || !isSafeAsciiName(data.styleName))
+        data.styleName = std::string(kDefaultStyleName);
 }
 
 bool validateForRuntime(const GameData& data, Setting::ValidationReport& report)
@@ -360,38 +525,38 @@ bool validateForRuntime(const GameData& data, Setting::ValidationReport& report)
 
     if (!isInRange(data.textScale, kMinTextScale, kMaxTextScale))
     {
-        addValidationIssue(report, std::string(), "Accessibility", "TextScale", "Out of range text scale", false);
+        addValidationIssue(report, std::string(), "Accessibility", "TextScale", "Out of range text scale", true);
         valid = false;
     }
 
     if (!isInRange(data.scale, kMinScale, kMaxScale))
     {
-        addValidationIssue(report, std::string(), "Accessibility", "Scale", "Out of range accessibility scale", false);
+        addValidationIssue(report, std::string(), "Accessibility", "Scale", "Out of range accessibility scale", true);
         valid = false;
     }
 
     if (!isInRange(data.physicFrameRate, kMinPhysicsFrameRate, kMaxPhysicsFrameRate))
     {
-        addValidationIssue(report, std::string(), "Game", "PhysicFrameRate", "Out of range simulation tick", false);
+        addValidationIssue(report, std::string(), "Game", "PhysicFrameRate", "Out of range simulation tick", true);
         valid = false;
     }
 
     if (!isInRange(data.gravity.x, kMinGravity, kMaxGravity) || !isInRange(data.gravity.y, kMinGravity, kMaxGravity))
     {
-        addValidationIssue(report, std::string(), "Physic", "Gravity", "Out of range gravity value", false);
+        addValidationIssue(report, std::string(), "Physic", "Gravity", "Out of range gravity value", true);
         valid = false;
     }
 
     if (!isInRange(data.bounciness, kMinBounciness, kMaxBounciness) ||
         !isInRange(data.friction, kMinFriction, kMaxFriction))
     {
-        addValidationIssue(report, std::string(), "Physic", "Movement", "Out of range movement parameter", false);
+        addValidationIssue(report, std::string(), "Physic", "Movement", "Out of range movement parameter", true);
         valid = false;
     }
 
     if (data.continuousCollisionMaxSqrVelocity < 0.f || !std::isfinite(data.continuousCollisionMaxSqrVelocity))
     {
-        addValidationIssue(report, std::string(), "Physic", "ContinuousCollisionMaxVelocity", "Invalid collision velocity", false);
+        addValidationIssue(report, std::string(), "Physic", "ContinuousCollisionMaxVelocity", "Invalid collision velocity", true);
         valid = false;
     }
     else
@@ -400,33 +565,33 @@ bool validateForRuntime(const GameData& data, Setting::ValidationReport& report)
         if (!isInRange(collisionMaxVelocity, kMinContinuousCollisionMaxVelocity, kMaxContinuousCollisionMaxVelocity))
         {
             addValidationIssue(report, std::string(), "Physic", "ContinuousCollisionMaxVelocity",
-                             "Out of range continuous collision velocity", false);
+                             "Out of range continuous collision velocity", true);
             valid = false;
         }
     }
 
     if (!isInRange(data.releaseImpulse, kMinPositiveFloat, kMaxReleaseImpulse))
     {
-        addValidationIssue(report, std::string(), "Physic", "InputReleaseImpulse", "Out of range release impulse", false);
+        addValidationIssue(report, std::string(), "Physic", "InputReleaseImpulse", "Out of range release impulse", true);
         valid = false;
     }
 
     if (!isInRange(data.isGroundedDetection, kMinPositiveFloat, kMaxIsGroundedDetection))
     {
-        addValidationIssue(report, std::string(), "Physic", "IsGroundedDetection", "Out of range grounded detection", false);
+        addValidationIssue(report, std::string(), "Physic", "IsGroundedDetection", "Out of range grounded detection", true);
         valid = false;
     }
 
     if (!isInRange(data.coyoteTimeCursorPos, kMinPositiveFloat, kMaxCoyoteTime))
     {
-        addValidationIssue(report, std::string(), "GamePlay", "CoyoteTimeCursorMovement", "Out of range coyote time", false);
+        addValidationIssue(report, std::string(), "GamePlay", "CoyoteTimeCursorMovement", "Out of range coyote time", true);
         valid = false;
     }
 
     if (data.footBasementWidth < kMinFootBasement || data.footBasementWidth > kMaxFootBasement ||
         data.footBasementHeight < kMinFootBasement || data.footBasementHeight > kMaxFootBasement)
     {
-        addValidationIssue(report, std::string(), "Physic", "FootBasement", "Foot basement is below minimum size", false);
+        addValidationIssue(report, std::string(), "Physic", "FootBasement", "Foot basement is below minimum size", true);
         valid = false;
     }
 
@@ -464,7 +629,7 @@ void applyDefaults(GameData& data)
     data.useForwardWindow          = true;
     data.useMousePassThoughWindow  = true;
 
-    data.styleName                 = "PetForDesktop";
+    data.styleName                 = std::string(kDefaultStyleName);
     data.debugEdgeDetection        = false;
 }
 
@@ -510,6 +675,7 @@ bool Setting::importFile(const char* src, GameData& data, ValidationReport& repo
     }
 
     warnUnknownSections(root, srcPath, report);
+    validateSettingSchema(root, srcPath, report);
 
     YAML::Node section;
     if (getSection(root, "Game", section))
@@ -582,11 +748,7 @@ bool Setting::importFile(const char* src, GameData& data, ValidationReport& repo
         std::string theme;
         if (readScalarWithReport(section, "Style", "Theme", theme, report, srcPath))
         {
-            if (!isReasonableThemeName(theme))
-                addValidationIssue(report, srcPath, "Style", "Theme",
-                                 "Invalid theme name; using default theme", false);
-            else
-                data.styleName = theme;
+            data.styleName = theme;
         }
     }
 
@@ -649,6 +811,8 @@ void Setting::exportFile(const char* dest, GameData& data)
             logf("Error in settings before export (%s): %s\n", errorItem.section.c_str(),
                  (errorItem.section + ": " + errorItem.field + ": " + errorItem.message).c_str());
         }
+
+        return;
     }
 
     const std::filesystem::path destinationPath(dest);

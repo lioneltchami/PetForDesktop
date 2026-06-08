@@ -15,12 +15,20 @@ SettingMenu::SettingMenu(GameData& inDatas, Pet& inPet, Vec2 inPosition)
 SettingMenu::~SettingMenu()
 {
     Setting::ValidationReport report;
-    Setting::sanitize(datas);
-    if (!Setting::validateForRuntime(datas, report))
+    const bool isDataSanitized = Setting::sanitize(datas);
+    if (!isDataSanitized)
+        log("Settings had malformed values and were normalized before saving.\n");
+
+    report = Setting::ValidationReport{};
+    const bool isValidForRuntime = Setting::validateForRuntime(datas, report);
+    if (!isValidForRuntime)
     {
         for (const auto& errorItem : report.errors)
             logf("Invalid setting before save (%s): %s\n", errorItem.section.c_str(),
                  (errorItem.section + ": " + errorItem.field + ": " + errorItem.message).c_str());
+
+        log("Settings save cancelled due to invalid runtime settings.\n");
+        return;
     }
 
     Setting::instance().exportFile(RESOURCE_PATH "/setting/setting.yaml", datas);
