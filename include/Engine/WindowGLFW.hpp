@@ -79,6 +79,15 @@ public:
 
     ~WindowGLFW()
     {
+        if (window)
+        {
+            if (glfwGetCurrentContext() == window)
+                glfwMakeContextCurrent(nullptr);
+
+            glfwDestroyWindow(window);
+            window = nullptr;
+        }
+
         glfwTerminate();
     }
 

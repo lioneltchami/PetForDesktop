@@ -59,5 +59,8 @@ Texture::~Texture()
 {
     if (data != nullptr)
         stbi_image_free(data);
-    glDeleteTextures(1, &ID);
+    data = nullptr;
+    if (ID != 0 && glfwGetCurrentContext() != nullptr)
+        glDeleteTextures(1, &ID);
+    ID = 0;
 }

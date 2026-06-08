@@ -4,12 +4,43 @@
 #include "Engine/Graphics/WindowOGL.hpp"
 
 #include <glad/glad.h>
+#include <GLFW/glfw3.h>
 #include <stdlib.h>
+#include <utility>
+#include <string_view>
 
 class Shader
 {
 public:
-    unsigned int ID;
+    unsigned int ID = 0;
+
+    Shader(const Shader&) = delete;
+    Shader& operator=(const Shader&) = delete;
+
+    Shader(Shader&& other) noexcept : ID(other.ID)
+    {
+        other.ID = 0;
+    }
+
+    Shader& operator=(Shader&& other) noexcept
+    {
+        if (this != &other)
+        {
+            if (ID != 0 && ID != other.ID && glfwGetCurrentContext() != nullptr)
+                glDeleteProgram(ID);
+
+            ID       = other.ID;
+            other.ID = 0;
+        }
+        return *this;
+    }
+
+    ~Shader()
+    {
+        if (ID != 0 && glfwGetCurrentContext() != nullptr)
+            glDeleteProgram(ID);
+        ID = 0;
+    }
 
     // constructor generates the shader on the fly
     // ------------------------------------------------------------------------
@@ -84,7 +115,7 @@ private:
     {
         int  success;
         char infoLog[1024];
-        if (type != "PROGRAM")
+        if (std::string_view(type) != "PROGRAM")
         {
             glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
             if (!success)

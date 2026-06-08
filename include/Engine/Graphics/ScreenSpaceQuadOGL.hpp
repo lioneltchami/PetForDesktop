@@ -1,17 +1,47 @@
 #pragma once
 
 #include "Engine/Graphics/WindowOGL.hpp"
+#include <GLFW/glfw3.h>
 #include <glad/glad.h>
 
 // TODO full screen Triangle
 class ScreenSpaceQuad
 {
 protected:
-    unsigned int VBO;
-    unsigned int VAO;
-    unsigned int EBO;
+    unsigned int VBO = 0;
+    unsigned int VAO = 0;
+    unsigned int EBO = 0;
 
 public:
+    ScreenSpaceQuad() = default;
+
+    ScreenSpaceQuad(const ScreenSpaceQuad&) = delete;
+    ScreenSpaceQuad& operator=(const ScreenSpaceQuad&) = delete;
+
+    ScreenSpaceQuad(ScreenSpaceQuad&& other) noexcept : VBO(other.VBO), VAO(other.VAO), EBO(other.EBO)
+    {
+        other.VBO = 0;
+        other.VAO = 0;
+        other.EBO = 0;
+    }
+
+    ScreenSpaceQuad& operator=(ScreenSpaceQuad&& other) noexcept
+    {
+        if (this != &other)
+        {
+            this->~ScreenSpaceQuad();
+            VBO = other.VBO;
+            VAO = other.VAO;
+            EBO = other.EBO;
+
+            other.VBO = 0;
+            other.VAO = 0;
+            other.EBO = 0;
+        }
+
+        return *this;
+    }
+
     ScreenSpaceQuad(Window& win, float minPos = -1.f, float maxPos = 1.f)
     {
         // TODO: Pos vec2 ?
@@ -50,9 +80,16 @@ public:
 
     ~ScreenSpaceQuad()
     {
-        glDeleteVertexArrays(1, &VAO);
-        glDeleteBuffers(1, &VBO);
-        glDeleteBuffers(1, &EBO);
+        if (VAO != 0 && glfwGetCurrentContext() != nullptr)
+            glDeleteVertexArrays(1, &VAO);
+        if (VBO != 0 && glfwGetCurrentContext() != nullptr)
+            glDeleteBuffers(1, &VBO);
+        if (EBO != 0 && glfwGetCurrentContext() != nullptr)
+            glDeleteBuffers(1, &EBO);
+
+        VBO = 0;
+        VAO = 0;
+        EBO = 0;
     }
 
     void use()

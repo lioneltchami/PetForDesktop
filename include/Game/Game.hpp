@@ -73,6 +73,28 @@ protected:
                                                        Texture::linearClampSampling);
     }
 
+    void releaseOpenGLResources()
+    {
+        if (!datas.window)
+            return;
+
+        GLFWwindow* gameWindow = datas.window->getWindow();
+        if (!gameWindow)
+            return;
+
+        datas.edgeDetectionShaders.clear();
+        datas.pImageShader.reset();
+        datas.pImageGreyScale.reset();
+        datas.pSpriteSheetShader.reset();
+        datas.pDiscordLogo.reset();
+        datas.pPatreonLogo.reset();
+        datas.pCollisionTexture.reset();
+        datas.pEdgeDetectionTexture.reset();
+        datas.pFramebuffer.reset();
+        datas.pUnitFullScreenQuad.reset();
+        datas.pFullScreenQuad.reset();
+    }
+
 public:
     Game() : physicSystem(datas)
     {
@@ -166,8 +188,28 @@ public:
             datas.monitorTopology->detachHotplugBridge();
         if (datas.window)
             datas.window->setMonitorCallback(nullptr);
+
+        GLFWwindow* gameWindow        = datas.window ? datas.window->getWindow() : nullptr;
+        GLFWwindow* previousContext   = glfwGetCurrentContext();
+        bool         shouldRestoreCtx = false;
+        if (gameWindow && previousContext != gameWindow)
+        {
+            glfwMakeContextCurrent(gameWindow);
+            shouldRestoreCtx = true;
+        }
+        else if (!previousContext)
+        {
+            shouldRestoreCtx = true;
+        }
+
         cleanUI();
-        glfwTerminate();
+        releaseOpenGLResources();
+
+        if (shouldRestoreCtx)
+            glfwMakeContextCurrent(previousContext);
+
+        datas.pets.clear();
+        datas.window.reset();
     }
 
     void runCollisionDetectionMode()

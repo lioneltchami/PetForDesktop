@@ -1,8 +1,10 @@
 #pragma once
 
 #include <glad/glad.h>
+#include <GLFW/glfw3.h>
 #include <functional>
 #include <vector>
+#include <utility>
 
 #include "Engine/ClassUtility.hpp"
 #include "Engine/Log.hpp"
@@ -11,9 +13,10 @@
 class Texture
 {
 protected:
-    unsigned int ID;
-    int          width, height;
-    int          nbChannels;
+    unsigned int    ID          = 0;
+    int             width       = 0;
+    int             height      = 0;
+    int             nbChannels  = 0;
     unsigned char* data = nullptr;
 
 public:
@@ -45,6 +48,42 @@ public:
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    }
+
+    Texture() = default;
+
+    Texture(const Texture&) = delete;
+    Texture& operator=(const Texture&) = delete;
+
+    Texture(Texture&& other) noexcept : ID{other.ID}, width{other.width}, height{other.height}, nbChannels{other.nbChannels},
+                                      data{other.data}
+    {
+        other.ID         = 0;
+        other.width      = 0;
+        other.height     = 0;
+        other.nbChannels = 0;
+        other.data       = nullptr;
+    }
+
+    Texture& operator=(Texture&& other) noexcept
+    {
+        if (this != &other)
+        {
+            this->~Texture();
+            ID         = other.ID;
+            width      = other.width;
+            height     = other.height;
+            nbChannels = other.nbChannels;
+            data       = other.data;
+
+            other.ID         = 0;
+            other.width      = 0;
+            other.height     = 0;
+            other.nbChannels = 0;
+            other.data       = nullptr;
+        }
+
+        return *this;
     }
 
     ~Texture();
