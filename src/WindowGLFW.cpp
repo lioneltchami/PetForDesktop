@@ -28,8 +28,9 @@ Vec2 normalizeWindowCursorToLogical(GLFWwindow* window, const double x, const do
         .windowLogicalPosition = datas.window->getPosition(),
         .windowLogicalSize = Vec2{static_cast<float>(logicalWidth), static_cast<float>(logicalHeight)},
         .windowPixelSize = Vec2{static_cast<float>(pixelWidth), static_cast<float>(pixelHeight)},
-        .fallbackScaleX = 0.0001f,
-        .fallbackScaleY = 0.0001f};
+        .fallbackScaleX = 1.f,
+        .fallbackScaleY = 1.f,
+        .cursorCoordinateSpace = Monitors::CursorCoordinateSpace::Logical};
 
     return datas.monitors.normalizeWindowCursor(cursor, options);
 }

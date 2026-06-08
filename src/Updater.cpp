@@ -515,6 +515,19 @@ bool parseManifestFromText(const std::string& manifestText, UpdateMetadata& meta
         hasAny = true;
     }
 
+    if (parseJsonStringField(manifestText, "tag", value))
+    {
+        metadata.tag = sanitizeMetadataText(value);
+        if (!metadata.tag.empty())
+            hasAny = true;
+    }
+    else if (parseJsonStringField(manifestText, "version", value))
+    {
+        metadata.tag = sanitizeMetadataText(value);
+        if (!metadata.tag.empty())
+            hasAny = true;
+    }
+
     if (parseJsonStringField(manifestText, "checksum", value) || parseJsonStringField(manifestText, "sha256", value))
     {
         const std::string normalizedChecksum = normalizeHexToken(value);

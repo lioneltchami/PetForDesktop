@@ -378,7 +378,9 @@ bool test_update_metadata_validation()
 
     // Good manifest-like payload
     if (!Updater::parseManifestForTest(
-            (std::string("{\"package\":\"https://github.com/example/app-v1.exe\",\"checksum\":\"") + validChecksum + "\"}").c_str(),
+            (std::string(
+                "{\"tag\":\"1.2.3\",\"package\":\"https://github.com/example/app-v1.exe\",\"checksum\":\"") +
+             validChecksum + "\"}").c_str(),
             metadata))
         return fail("parse valid manifest");
 
@@ -386,6 +388,8 @@ bool test_update_metadata_validation()
         return fail("default checksum algorithm should be sha256");
     if (metadata.packageUrl != "https://github.com/example/app-v1.exe")
         return fail("default package URL parsed");
+    if (metadata.tag != "1.2.3")
+        return fail("tag parsed");
 
     // Invalid host or malformed package destination must fail manifest parse.
     if (Updater::parseManifestForTest("{\"package\":\"https://not-trusted.example.com/app-v1.exe\",\"checksum\":\"a\"}",
@@ -409,9 +413,11 @@ bool test_update_metadata_validation()
     metadata.tag = "1.0.0";
     metadata.checksum = std::string(64, 'a');
     metadata.checksumAlgorithm = "sha256";
-    metadata.signatureAlgorithm = "sha256";
     metadata.packageName = "app-v1.exe";
     metadata.packageUrl = "https://github.com/example/app-v1.exe";
+    metadata.signature.clear();
+    metadata.signatureAlgorithm.clear();
+    metadata.signaturePublicKey.clear();
     if (!Updater::validateMetadataEnvelopeForTest(metadata, error))
     {
         return fail("valid envelope");
@@ -453,24 +459,39 @@ bool test_cursor_normalization_for_mixed_scale()
     const Vec2 physicalWindowSize{static_cast<float>(static_cast<int>(logicalWindowSize.x * 1.25f)),
                                  static_cast<float>(static_cast<int>(logicalWindowSize.y * 1.25f))};
 
-    auto normalize = [&](const Vec2& cursor) {
+    auto normalizeAsLogical = [&](const Vec2& cursor) {
         return monitors.normalizeWindowCursor(cursor,
-                                             {logicalWindowPos, logicalWindowSize, physicalWindowSize, 0.0001f, 0.0001f});
+                                             {logicalWindowPos,
+                                              logicalWindowSize,
+                                              physicalWindowSize,
+                                              1.f,
+                                              1.f,
+                                              Monitors::CursorCoordinateSpace::Logical});
+    };
+
+    auto normalizeAsPhysical = [&](const Vec2& cursor) {
+        return monitors.normalizeWindowCursor(cursor,
+                                             {logicalWindowPos,
+                                              logicalWindowSize,
+                                              physicalWindowSize,
+                                              1.f,
+                                              1.f,
+                                              Monitors::CursorCoordinateSpace::Physical});
     };
 
     const Vec2 logicalInput{120.f, 40.f};
-    const Vec2 logicalResult = normalize(logicalInput);
+    const Vec2 logicalResult = normalizeAsLogical(logicalInput);
     if (!near(logicalResult.x, logicalInput.x) || !near(logicalResult.y, logicalInput.y))
         return fail("logical passthrough");
 
     const Vec2 physicalInput{logicalInput.x * 1.25f, logicalInput.y * 1.25f};
-    const Vec2 physicalResult = normalize(physicalInput);
+    const Vec2 physicalResult = normalizeAsPhysical(physicalInput);
     if (!near(physicalResult.x, logicalInput.x) || !near(physicalResult.y, logicalInput.y))
         return fail("physical to logical conversion");
 
     // outside physical bounds but closest to logical should clamp/keep fallback path.
     const Vec2 outsidePhysical{logicalWindowSize.x * 1.25f + 40.f, logicalWindowSize.y * 1.25f + 16.f};
-    const Vec2 outsideResult = normalize(outsidePhysical);
+    const Vec2 outsideResult = normalizeAsPhysical(outsidePhysical);
     if (!std::isfinite(outsideResult.x) || !std::isfinite(outsideResult.y) || outsideResult.x < 0.f || outsideResult.y < 0.f)
         return fail("outside cursor fallback");
 
@@ -497,29 +518,44 @@ bool test_cursor_normalization_for_scale_variants()
         const Vec2 logicalInput{96.f, 44.f};
         const Vec2 physicalInput{logicalInput.x * scale, logicalInput.y * scale};
 
-        auto normalize = [&](const Vec2& cursor) {
+        auto normalizeAsLogical = [&](const Vec2& cursor) {
             return monitors.normalizeWindowCursor(cursor,
-                                                 {logicalWindowPos, logicalWindowSize, physicalWindowSize, 0.0001f, 0.0001f});
+                                                 {logicalWindowPos,
+                                                  logicalWindowSize,
+                                                  physicalWindowSize,
+                                                  1.f,
+                                                  1.f,
+                                                  Monitors::CursorCoordinateSpace::Logical});
         };
 
-        const Vec2 logicalResult = normalize(logicalInput);
+        auto normalizeAsPhysical = [&](const Vec2& cursor) {
+            return monitors.normalizeWindowCursor(cursor,
+                                                 {logicalWindowPos,
+                                                  logicalWindowSize,
+                                                  physicalWindowSize,
+                                                  1.f,
+                                                  1.f,
+                                                  Monitors::CursorCoordinateSpace::Physical});
+        };
+
+        const Vec2 logicalResult = normalizeAsLogical(logicalInput);
         if (!near(logicalResult.x, logicalInput.x) || !near(logicalResult.y, logicalInput.y))
             return false;
 
         const Vec2 outsidePhysical = physicalWindowSize + Vec2{32.f, 16.f};
-        const Vec2 outsideResult = normalize(outsidePhysical);
+        const Vec2 outsideResult = normalizeAsPhysical(outsidePhysical);
         if (!std::isfinite(outsideResult.x) || !std::isfinite(outsideResult.y) || outsideResult.x < 0.f || outsideResult.y < 0.f)
             return false;
 
-        if (scale > 1.f && (physicalInput.x > logicalWindowSize.x || physicalInput.y > logicalWindowSize.y))
+        if (scale > 1.f)
         {
-            const Vec2 physicalResult = normalize(physicalInput);
+            const Vec2 physicalResult = normalizeAsPhysical(physicalInput);
             if (!near(physicalResult.x, logicalInput.x) || !near(physicalResult.y, logicalInput.y))
                 return false;
         }
         else
         {
-            const Vec2 passthroughResult = normalize(physicalInput);
+            const Vec2 passthroughResult = normalizeAsLogical(physicalInput);
             if (!near(passthroughResult.x, physicalInput.x) || !near(passthroughResult.y, physicalInput.y))
                 return false;
         }

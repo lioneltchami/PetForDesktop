@@ -10,17 +10,25 @@
 #include <mutex>
 #include <optional>
 #include <limits>
+#include <cstdint>
 
 class Monitors
 {
 public:
+    enum class CursorCoordinateSpace : uint8_t
+    {
+        Logical,
+        Physical
+    };
+
     struct CursorTransformOptions
     {
         Vec2 windowLogicalPosition = Vec2::zero();
         Vec2 windowLogicalSize     = Vec2::zero();
         Vec2 windowPixelSize       = Vec2::zero();
-        float fallbackScaleX       = 0.0001f;
-        float fallbackScaleY       = 0.0001f;
+        float fallbackScaleX       = 1.f;
+        float fallbackScaleY       = 1.f;
+        CursorCoordinateSpace cursorCoordinateSpace = CursorCoordinateSpace::Logical;
     };
 
     struct CoordinateAffineTransform
@@ -487,7 +495,8 @@ public:
         };
 
         const bool logicalInside = isInsideRect(cursorPos, logicalSize);
-        if (logicalInside && options.windowPixelSize.x <= 0.f && options.windowPixelSize.y <= 0.f)
+        if (logicalInside && options.cursorCoordinateSpace == CursorCoordinateSpace::Logical &&
+            options.windowPixelSize.x <= 0.f && options.windowPixelSize.y <= 0.f)
             return cursorPos;
 
         const Vec2 inferredPixelSize = {
@@ -498,34 +507,58 @@ public:
             options.windowPixelSize.x > 0.f && options.windowPixelSize.y > 0.f && options.windowPixelSize.x > 1.f &&
             options.windowPixelSize.y > 1.f;
         const bool cursorInsidePhysical = isInsideRect(cursorPos, inferredPixelSize);
-        const bool cursorLooksPhysical = hasPixelWindowMetrics && !logicalInside && cursorInsidePhysical;
-        if (!cursorLooksPhysical && !logicalInside)
+        const bool inputAssumedPhysical = options.cursorCoordinateSpace == CursorCoordinateSpace::Physical;
+        const bool cursorLooksPhysical = hasPixelWindowMetrics && (inputAssumedPhysical || (!logicalInside && cursorInsidePhysical));
+        if (!cursorLooksPhysical)
         {
+            if (inputAssumedPhysical)
+            {
+                const float scaleX = std::max(hasPixelWindowMetrics ? options.windowPixelSize.x / std::max(logicalSize.x, 0.0001f)
+                                                                 : options.fallbackScaleX,
+                                                 0.0001f);
+                const float scaleY = std::max(hasPixelWindowMetrics ? options.windowPixelSize.y / std::max(logicalSize.y, 0.0001f)
+                                                                 : options.fallbackScaleY,
+                                                 0.0001f);
+                const Vec2 logicalFromPhysical = {cursorPos.x / scaleX, cursorPos.y / scaleY};
+                return {std::clamp(logicalFromPhysical.x, 0.f, logicalSize.x),
+                        std::clamp(logicalFromPhysical.y, 0.f, logicalSize.y)};
+            }
+
             return {std::clamp(cursorPos.x, 0.f, logicalSize.x), std::clamp(cursorPos.y, 0.f, logicalSize.y)};
         }
-
-        if (!cursorLooksPhysical && logicalInside)
-            return cursorPos;
 
         Vec2 cursorBest = cursorPos;
         float bestDistance = std::numeric_limits<float>::infinity();
         bool foundCandidate = false;
+        bool bestHasPhysicalMatch = false;
 
         forEachMonitorTransform([&](const MonitorTransform& monitor) {
             const Vec2 originInPixel = monitor.logicalToPhysical(options.windowLogicalPosition);
-            const Vec2 cursorFromPixel = monitor.physicalToLogical(originInPixel + cursorPos) - options.windowLogicalPosition;
+            const Vec2 cursorAbsPixel = originInPixel + cursorPos;
+            const Vec2 cursorFromPixel = monitor.physicalToLogical(cursorAbsPixel) - options.windowLogicalPosition;
+            const bool cursorInsideMonitor = monitor.containsPhysicalPoint(cursorAbsPixel);
 
             const bool inside = isInsideRect(cursorFromPixel, logicalSize);
             if (inside)
             {
-                cursorBest = cursorFromPixel;
-                foundCandidate = true;
-                bestDistance = 0.f;
+                if (cursorInsideMonitor)
+                {
+                    cursorBest = cursorFromPixel;
+                    foundCandidate = true;
+                    bestDistance = 0.f;
+                    bestHasPhysicalMatch = true;
+                }
+                else if (!bestHasPhysicalMatch)
+                {
+                    cursorBest = cursorFromPixel;
+                    foundCandidate = true;
+                    bestDistance = 0.f;
+                }
                 return;
             }
 
             const float candidateDistance = pointToRectDistanceSq(cursorFromPixel, logicalSize);
-            if (candidateDistance < bestDistance)
+            if (!bestHasPhysicalMatch && candidateDistance < bestDistance)
             {
                 bestDistance = candidateDistance;
                 cursorBest = cursorFromPixel;
