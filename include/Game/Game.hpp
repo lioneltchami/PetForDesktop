@@ -144,6 +144,10 @@ public:
             datas.pixelPerMeter = {(float)monitorSize.x / (monitorSizeMM.x * 0.001f),
                                    (float)monitorSize.y / (monitorSizeMM.y * 0.001f)};
         }
+        else
+        {
+            datas.pixelPerMeter = Vec2{96.f / 0.0254f, 96.f / 0.0254f};
+        }
 
         datas.interactionSystem = std::make_unique<InteractionSystem>();
 

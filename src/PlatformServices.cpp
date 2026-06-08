@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <climits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -95,19 +96,45 @@ public:
     Vec2i getMonitorsSize() const override
     {
         Vec2i size = Vec2i::zero();
+        if (!monitors.size())
+            return size;
+
+        int minX = INT_MAX;
+        int minY = INT_MAX;
+        int maxX = INT_MIN;
+        int maxY = INT_MIN;
+
         for (int i = 0; i < static_cast<int>(monitors.size()); ++i)
         {
-            const GLFWvidmode* currentVideoMode = glfwGetVideoMode(monitors[i]);
-            if (currentVideoMode)
+            if (monitors[i])
             {
-                Vec2 scale{1.f, 1.f};
-                getMonitorContentScale(i, scale);
-                const float invScaleX = 1.f / scale.x;
-                const float invScaleY = 1.f / scale.y;
-                size.x += static_cast<int>(std::round(currentVideoMode->width * invScaleX));
-                size.y += static_cast<int>(std::round(currentVideoMode->height * invScaleY));
+                const GLFWvidmode* currentVideoMode = glfwGetVideoMode(monitors[i]);
+                if (currentVideoMode)
+                {
+                    Vec2 scale{1.f, 1.f};
+                    getMonitorContentScale(i, scale);
+                    const float invScaleX = 1.f / std::max(scale.x, 0.01f);
+                    const float invScaleY = 1.f / std::max(scale.y, 0.01f);
+                    const int logicalWidth  = static_cast<int>(std::round(currentVideoMode->width * invScaleX));
+                    const int logicalHeight = static_cast<int>(std::round(currentVideoMode->height * invScaleY));
+
+                    int monitorX = 0;
+                    int monitorY = 0;
+                    glfwGetMonitorPos(monitors[i], &monitorX, &monitorY);
+
+                    minX = std::min(minX, monitorX);
+                    minY = std::min(minY, monitorY);
+                    maxX = std::max(maxX, monitorX + logicalWidth);
+                    maxY = std::max(maxY, monitorY + logicalHeight);
+                }
             }
         }
+
+        if (minX == INT_MAX || minY == INT_MAX || maxX == INT_MIN || maxY == INT_MIN)
+            return size;
+
+        size.x = maxX - minX;
+        size.y = maxY - minY;
         return size;
     }
 

@@ -1,0 +1,783 @@
+#include "Engine/Updater.hpp"
+
+#include "Engine/FileExplorer.hpp"
+#include "Engine/Log.hpp"
+#include "Game/UpdateMenu.hpp"
+
+#include <array>
+#include <cctype>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <iomanip>
+#include <regex>
+#include <sstream>
+#include <string>
+
+#include <cpr/cpr.h>
+
+namespace
+{
+constexpr const char* kReleaseApiEndpoint = "https://api.github.com/repos/Renardjojo/PetDesktop/releases/latest";
+constexpr std::size_t kMaxDownloadBytes = 1024 * 1024 * 300; // 300MB hard cap per update payload
+
+struct Version
+{
+    int major = 0;
+    int minor = 0;
+    int patch = 0;
+};
+
+bool parseVersion(const std::string& tag, Version& version)
+{
+    const auto firstDigit = tag.find_first_of("0123456789");
+    if (firstDigit == std::string::npos)
+        return false;
+
+    std::istringstream stream{tag.substr(firstDigit)};
+    char dot;
+    stream >> version.major >> dot >> version.minor >> dot >> version.patch;
+    return stream;
+}
+
+bool isGreaterVersion(const std::string& current, const std::string& incoming)
+{
+    Version currentVersion;
+    Version incomingVersion;
+
+    if (!parseVersion(current, currentVersion) || !parseVersion(incoming, incomingVersion))
+        return incoming != current;
+
+    if (incomingVersion.major != currentVersion.major)
+        return incomingVersion.major > currentVersion.major;
+
+    if (incomingVersion.minor != currentVersion.minor)
+        return incomingVersion.minor > currentVersion.minor;
+
+    return incomingVersion.patch > currentVersion.patch;
+}
+
+bool parseJsonStringField(const std::string& text, const std::string& key, std::string& value, std::size_t begin = 0)
+{
+    const std::string pattern = "\"" + key + "\"";
+    const auto keyPos         = text.find(pattern, begin);
+    if (keyPos == std::string::npos)
+        return false;
+
+    const auto colonPos = text.find(':', keyPos);
+    if (colonPos == std::string::npos)
+        return false;
+
+    auto quotePos = text.find('"', colonPos + 1);
+    if (quotePos == std::string::npos)
+        return false;
+
+    std::string raw;
+    for (std::size_t i = quotePos + 1; i < text.size(); ++i)
+    {
+        const char c = text[i];
+        if (c == '\\')
+        {
+            if (i + 1 >= text.size())
+                return false;
+
+            const char next = text[i + 1];
+            switch (next)
+            {
+            case '"':
+                raw.push_back('"');
+                ++i;
+                break;
+            case '\\':
+                raw.push_back('\\');
+                ++i;
+                break;
+            case '/':
+                raw.push_back('/');
+                ++i;
+                break;
+            case 'b':
+                raw.push_back('\b');
+                ++i;
+                break;
+            case 'f':
+                raw.push_back('\f');
+                ++i;
+                break;
+            case 'n':
+                raw.push_back('\n');
+                ++i;
+                break;
+            case 'r':
+                raw.push_back('\r');
+                ++i;
+                break;
+            case 't':
+                raw.push_back('\t');
+                ++i;
+                break;
+            case 'u':
+                if (i + 5 < text.size())
+                {
+                    raw.push_back(text[i + 1]);
+                    i += 5;
+                }
+                else
+                {
+                    return false;
+                }
+                break;
+            default:
+                return false;
+            }
+        }
+        else if (c == '"')
+        {
+            value = raw;
+            return true;
+        }
+        else
+        {
+            raw.push_back(c);
+        }
+    }
+
+    return false;
+}
+
+bool isMatchForCurrentPlatform(const std::string& lowerName)
+{
+#ifdef _WIN32
+    return lowerName.find(".exe") != std::string::npos;
+#else
+    return true;
+#endif
+}
+
+bool shouldPreferNameForPlatform(const std::string& lowerName)
+{
+#ifdef _WIN32
+    return lowerName.find("windows") != std::string::npos || lowerName.find("win") != std::string::npos;
+#else
+    return true;
+#endif
+}
+
+void toLower(std::string& value)
+{
+    for (auto& c : value)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+}
+
+bool parseAssetList(const std::string& releaseJson, std::vector<UpdateAssetMetadata>& assets)
+{
+    const auto assetsPos = releaseJson.find("\"assets\"");
+    if (assetsPos == std::string::npos)
+        return false;
+
+    const auto arrayStart = releaseJson.find('[', assetsPos);
+    const auto arrayEnd   = releaseJson.find(']', arrayStart);
+    if (arrayStart == std::string::npos || arrayEnd == std::string::npos || arrayEnd <= arrayStart)
+        return false;
+
+    const std::string block = releaseJson.substr(arrayStart, arrayEnd - arrayStart + 1);
+
+    std::size_t cursor = 0;
+    while (cursor < block.size())
+    {
+        const auto objectStart = block.find('{', cursor);
+        if (objectStart == std::string::npos)
+            break;
+
+        int depth = 0;
+        std::size_t objectEnd = objectStart;
+        for ( ; objectEnd < block.size(); ++objectEnd)
+        {
+            if (block[objectEnd] == '{')
+                ++depth;
+            else if (block[objectEnd] == '}')
+            {
+                --depth;
+                if (depth == 0)
+                    break;
+            }
+        }
+
+        if (objectEnd >= block.size() || depth != 0)
+            break;
+
+        const std::string item = block.substr(objectStart, objectEnd - objectStart + 1);
+
+        UpdateAssetMetadata asset;
+        std::string sizeValue;
+        if (parseJsonStringField(item, "name", asset.name) &&
+            parseJsonStringField(item, "browser_download_url", asset.downloadUrl))
+        {
+            parseJsonStringField(item, "size", sizeValue);
+            asset.size = sizeValue;
+            assets.emplace_back(std::move(asset));
+        }
+
+        cursor = objectEnd + 1;
+    }
+
+    return !assets.empty();
+}
+
+bool parseManifestFromText(const std::string& manifestText, UpdateMetadata& metadata)
+{
+    bool hasAny = false;
+    if (!metadata.packageUrl.empty())
+        hasAny = true;
+
+    std::string value;
+    if (parseJsonStringField(manifestText, "package", value))
+    {
+        if (!value.empty())
+        {
+            metadata.packageUrl = value;
+            metadata.packageName = std::filesystem::path(value).filename().string();
+            hasAny = true;
+        }
+    }
+
+    if (parseJsonStringField(manifestText, "url", value))
+    {
+        if (!value.empty())
+        {
+            metadata.packageUrl = value;
+            metadata.packageName = std::filesystem::path(value).filename().string();
+            hasAny = true;
+        }
+    }
+
+    if (parseJsonStringField(manifestText, "sha256", value) || parseJsonStringField(manifestText, "checksum", value))
+    {
+        if (!value.empty())
+        {
+            metadata.checksum = value;
+            hasAny = true;
+        }
+    }
+
+    if (parseJsonStringField(manifestText, "signature", value))
+    {
+        metadata.signature = value;
+        hasAny = true;
+    }
+
+    if (parseJsonStringField(manifestText, "checksum_algorithm", value))
+    {
+        if (!value.empty())
+            metadata.checksumAlgorithm = value;
+    }
+
+    return hasAny;
+}
+
+bool downloadToString(const std::string& url, std::string& payload, std::string& error)
+{
+    const auto response = cpr::Get(cpr::Url{url}, cpr::VerifySsl{true}, cpr::ssl::VerifyHost{true}, cpr::ssl::VerifyPeer{true},
+                               cpr::Header{{"User-Agent", PROJECT_NAME "/" PROJECT_VERSION}});
+    if (response.error)
+    {
+        error = response.error.message;
+        return false;
+    }
+
+    if (response.status_code < 200 || response.status_code >= 300)
+    {
+        error = "HTTP status " + std::to_string(response.status_code);
+        return false;
+    }
+
+    payload = response.text;
+    return true;
+}
+
+bool downloadToFile(const std::string& url, const std::filesystem::path& stagingPath, std::string& error)
+{
+    std::string responsePayload;
+    if (!downloadToString(url, responsePayload, error))
+        return false;
+
+    if (responsePayload.empty())
+    {
+        error = "Downloaded payload is empty";
+        return false;
+    }
+
+    if (responsePayload.size() > kMaxDownloadBytes)
+    {
+        error = "Downloaded payload exceeds update size limit";
+        return false;
+    }
+
+    std::ofstream output(stagingPath, std::ios::binary | std::ios::trunc);
+    if (!output)
+    {
+        error = "Could not open temporary file for update payload";
+        return false;
+    }
+
+    output.write(responsePayload.data(), static_cast<std::streamsize>(responsePayload.size()));
+    output.close();
+
+    if (!output)
+    {
+        error = "Could not write update payload";
+        return false;
+    }
+
+    return true;
+}
+
+class SHA256
+{
+private:
+    uint32_t m_state[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+                           0x5be0cd19};
+    uint64_t m_bitCount = 0;
+    uint8_t  m_buffer[64]{};
+    uint32_t m_bufferSize = 0;
+
+    static uint32_t rotr(uint32_t value, uint32_t shift)
+    {
+        return (value >> shift) | (value << (32u - shift));
+    }
+
+    static uint32_t ch(uint32_t x, uint32_t y, uint32_t z)
+    {
+        return (x & y) ^ (~x & z);
+    }
+
+    static uint32_t maj(uint32_t x, uint32_t y, uint32_t z)
+    {
+        return (x & y) ^ (x & z) ^ (y & z);
+    }
+
+    static uint32_t bigSig0(uint32_t x)
+    {
+        return rotr(x, 2) ^ rotr(x, 13) ^ rotr(x, 22);
+    }
+
+    static uint32_t bigSig1(uint32_t x)
+    {
+        return rotr(x, 6) ^ rotr(x, 11) ^ rotr(x, 25);
+    }
+
+    static uint32_t smallSig0(uint32_t x)
+    {
+        return rotr(x, 7) ^ rotr(x, 18) ^ (x >> 3);
+    }
+
+    static uint32_t smallSig1(uint32_t x)
+    {
+        return rotr(x, 17) ^ rotr(x, 19) ^ (x >> 10);
+    }
+
+    static void pack32(const uint8_t src[4], uint32_t& dst)
+    {
+        dst = (static_cast<uint32_t>(src[0]) << 24) | (static_cast<uint32_t>(src[1]) << 16) |
+              (static_cast<uint32_t>(src[2]) << 8) | (static_cast<uint32_t>(src[3]));
+    }
+
+    static void unpack32(uint8_t dst[4], uint32_t src)
+    {
+        dst[0] = static_cast<uint8_t>((src >> 24) & 0xff);
+        dst[1] = static_cast<uint8_t>((src >> 16) & 0xff);
+        dst[2] = static_cast<uint8_t>((src >> 8) & 0xff);
+        dst[3] = static_cast<uint8_t>(src & 0xff);
+    }
+
+    void transform(const uint8_t block[64])
+    {
+        static const uint32_t k[64] = {
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+            0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+            0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+            0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+            0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+            0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+            0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+
+        uint32_t w[64] = {0};
+        for (int i = 0; i < 16; ++i)
+        {
+            pack32(&block[i * 4], w[i]);
+        }
+
+        for (int i = 16; i < 64; ++i)
+        {
+            const uint32_t t1 = w[i - 16] + smallSig0(w[i - 15]) + w[i - 7] + smallSig1(w[i - 2]);
+            w[i]            = t1;
+        }
+
+        uint32_t a = m_state[0];
+        uint32_t b = m_state[1];
+        uint32_t c = m_state[2];
+        uint32_t d = m_state[3];
+        uint32_t e = m_state[4];
+        uint32_t f = m_state[5];
+        uint32_t g = m_state[6];
+        uint32_t h = m_state[7];
+
+        for (int i = 0; i < 64; ++i)
+        {
+            const uint32_t t1 = h + bigSig1(e) + ch(e, f, g) + k[i] + w[i];
+            const uint32_t t2 = bigSig0(a) + maj(a, b, c);
+            h                = g;
+            g                = f;
+            f                = e;
+            e                = d + t1;
+            d                = c;
+            c                = b;
+            b                = a;
+            a                = t1 + t2;
+        }
+
+        m_state[0] += a;
+        m_state[1] += b;
+        m_state[2] += c;
+        m_state[3] += d;
+        m_state[4] += e;
+        m_state[5] += f;
+        m_state[6] += g;
+        m_state[7] += h;
+    }
+
+public:
+    void update(const uint8_t* data, std::size_t length)
+    {
+        if (!data || length == 0)
+            return;
+
+        m_bitCount += length * 8ULL;
+
+        while (length > 0)
+        {
+            const std::size_t needed = 64 - m_bufferSize;
+            const std::size_t fill   = std::min(needed, length);
+
+            memcpy(m_buffer + m_bufferSize, data, fill);
+            data += fill;
+            m_bufferSize += static_cast<uint32_t>(fill);
+            length -= fill;
+
+            if (m_bufferSize == 64)
+            {
+                transform(m_buffer);
+                m_bufferSize = 0;
+            }
+        }
+    }
+
+    std::string final()
+    {
+        uint8_t pad[128] = {0};
+        pad[0] = 0x80;
+
+        const auto padding = (m_bufferSize < 56) ? (56 - m_bufferSize) : (56 + 64 - m_bufferSize);
+        update(pad, padding);
+
+        uint8_t lengthBytes[8];
+        const uint64_t bits = m_bitCount;
+        lengthBytes[7]      = static_cast<uint8_t>(bits);
+        lengthBytes[6]      = static_cast<uint8_t>(bits >> 8);
+        lengthBytes[5]      = static_cast<uint8_t>(bits >> 16);
+        lengthBytes[4]      = static_cast<uint8_t>(bits >> 24);
+        lengthBytes[3]      = static_cast<uint8_t>(bits >> 32);
+        lengthBytes[2]      = static_cast<uint8_t>(bits >> 40);
+        lengthBytes[1]      = static_cast<uint8_t>(bits >> 48);
+        lengthBytes[0]      = static_cast<uint8_t>(bits >> 56);
+        update(lengthBytes, 8);
+
+        uint8_t hash[32];
+        for (int i = 0; i < 8; ++i)
+            unpack32(&hash[i * 4], m_state[i]);
+
+        std::ostringstream out;
+        out << std::hex << std::setfill('0') << std::nouppercase;
+        for (uint8_t byte : hash)
+            out << std::setw(2) << static_cast<int>(byte);
+
+        // reset
+        m_state[0] = 0x6a09e667;
+        m_state[1] = 0xbb67ae85;
+        m_state[2] = 0x3c6ef372;
+        m_state[3] = 0xa54ff53a;
+        m_state[4] = 0x510e527f;
+        m_state[5] = 0x9b05688c;
+        m_state[6] = 0x1f83d9ab;
+        m_state[7] = 0x5be0cd19;
+        m_bitCount = 0;
+        m_bufferSize = 0;
+
+        return out.str();
+    }
+};
+
+bool verifySha256Checksum(const std::filesystem::path& filePath, const std::string& expectedHash)
+{
+    std::ifstream input(filePath, std::ios::binary);
+    if (!input)
+        return false;
+
+    SHA256 hasher;
+    std::array<uint8_t, 1 << 15> buffer;
+    while (input.good())
+    {
+        input.read(reinterpret_cast<char*>(buffer.data()), buffer.size());
+        const auto count = static_cast<std::size_t>(input.gcount());
+        if (count > 0)
+            hasher.update(buffer.data(), count);
+    }
+
+    const auto actual = hasher.final();
+    auto normalizedExpected = expectedHash;
+    for (auto& c : normalizedExpected)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    return actual == normalizedExpected;
+}
+
+bool isChecksumValid(const std::filesystem::path& stagedFile, const UpdateMetadata& metadata)
+{
+    if (metadata.checksum.empty())
+        return false;
+
+    if (metadata.checksumAlgorithm != "sha256" && metadata.checksumAlgorithm != "SHA256")
+    {
+        logf("Unsupported checksum algorithm '%s'\n", metadata.checksumAlgorithm.c_str());
+        return false;
+    }
+
+    if (!verifySha256Checksum(stagedFile, metadata.checksum))
+    {
+        log("Update checksum verification failed\n");
+        return false;
+    }
+
+    return true;
+}
+} // namespace
+
+bool Updater::isVersionAvailable(const std::string& currentTag, const std::string& remoteTag) const
+{
+    return isGreaterVersion(currentTag, remoteTag);
+}
+
+bool Updater::fetchReleaseMetadata(UpdateMetadata& metadata, std::string& error)
+{
+    std::string releaseJson;
+    if (!downloadToString(kReleaseApiEndpoint, releaseJson, error))
+        return false;
+
+    if (!parseJsonStringField(releaseJson, "tag_name", metadata.tag))
+    {
+        error = "Could not parse release tag";
+        return false;
+    }
+
+    parseJsonStringField(releaseJson, "body", metadata.releaseNotes);
+
+    parseAssetList(releaseJson, metadata.assets);
+    if (metadata.assets.empty())
+    {
+        error = "No release assets found";
+        return false;
+    }
+
+    // Optional manifest object can provide checksum and signature details.
+    for (const auto& asset : metadata.assets)
+    {
+        const std::string candidateName = asset.name;
+        std::string lowerName = candidateName;
+        toLower(lowerName);
+
+        if (lowerName.find(".json") != std::string::npos && (lowerName.find("manifest") != std::string::npos ||
+                                                             lowerName.find("update") != std::string::npos))
+        {
+            std::string manifestText;
+            if (downloadToString(asset.downloadUrl, manifestText, error))
+            {
+                parseManifestFromText(manifestText, metadata);
+                metadata.packageName = asset.name;
+                break;
+            }
+        }
+    }
+
+    return true;
+}
+
+bool Updater::resolvePlatformPackage(const UpdateMetadata& metadata, UpdateMetadata& resolved, std::string& error) const
+{
+    std::vector<UpdateAssetMetadata> candidates;
+    for (const auto& asset : metadata.assets)
+    {
+        std::string lower = asset.name;
+        toLower(lower);
+
+        if (!isMatchForCurrentPlatform(lower))
+            continue;
+
+        candidates.emplace_back(asset);
+    }
+
+    if (candidates.empty())
+    {
+        error = "No matching release asset for this platform";
+        return false;
+    }
+
+    const auto prefer = [&](const std::vector<UpdateAssetMetadata>& input) -> const UpdateAssetMetadata*
+    {
+        for (const auto& candidate : input)
+        {
+            std::string lower = candidate.name;
+            toLower(lower);
+            if (shouldPreferNameForPlatform(lower))
+                return &candidate;
+        }
+        return nullptr;
+    };
+
+    const UpdateAssetMetadata* preferred = prefer(candidates);
+    if (!preferred)
+        preferred = &candidates[0];
+
+    resolved = metadata;
+    resolved.packageUrl = preferred->downloadUrl;
+    resolved.packageName = preferred->name;
+
+    return true;
+}
+
+bool Updater::downloadAndStageUpdate(const UpdateMetadata& metadata, std::filesystem::path& stagedFile,
+                                    std::string& error) const
+{
+    const auto stageDir = std::filesystem::temp_directory_path();
+    const auto time     = std::chrono::steady_clock::now().time_since_epoch().count();
+
+    const std::string fileName = metadata.packageName.empty() ? std::string("PetForDesktop-Update.bin") : metadata.packageName;
+    const std::filesystem::path stagedPath = stageDir / fileName;
+    const std::filesystem::path stagedPartPath = stagedPath.string() + ".part";
+
+    if (std::filesystem::exists(stagedPartPath))
+        std::filesystem::remove(stagedPartPath);
+
+    if (!downloadToFile(metadata.packageUrl, stagedPartPath, error))
+        return false;
+
+    if (std::filesystem::exists(stagedPath))
+        std::filesystem::remove(stagedPath);
+
+    std::filesystem::rename(stagedPartPath, stagedPath);
+    stagedFile = stagedPath;
+
+    logf("Update payload staged in %s\n", stagedFile.string().c_str());
+    return true;
+}
+
+bool Updater::verifyDownloadedPackage(const std::filesystem::path& stagedFile, const UpdateMetadata& metadata,
+                                     std::string& error) const
+{
+    if (!std::filesystem::exists(stagedFile))
+    {
+        error = "Staged update file not found";
+        return false;
+    }
+
+    if (!metadata.checksum.empty() && !isChecksumValid(stagedFile, metadata))
+    {
+        error = "Checksum verification failed";
+        return false;
+    }
+
+    if (!metadata.signature.empty())
+    {
+        // Signature verification is not implemented here, but signature data is preserved for future trust policy expansion.
+        log("Signed update metadata detected. Signature validation is currently not available in this build.\n");
+    }
+
+    return true;
+}
+
+bool Updater::applyPackage(const std::filesystem::path& stagedFile, const UpdateMetadata& metadata,
+                          std::string& error) const
+{
+    (void)metadata;
+    if (!std::filesystem::exists(stagedFile))
+    {
+        error = "Staged update file not found";
+        return false;
+    }
+
+    SystemOpen(stagedFile.string());
+    return true;
+}
+
+bool Updater::checkForUpdate(GameData& datas)
+{
+    UpdateMetadata metadata;
+    std::string error;
+
+    if (!fetchReleaseMetadata(metadata, error))
+    {
+        log(("Update check failed: " + error + "\n").c_str());
+        return false;
+    }
+
+    if (!isVersionAvailable(PROJECT_VERSION, metadata.tag))
+    {
+        logf("Version %s is up to date\n", PROJECT_VERSION);
+        return false;
+    }
+
+    if (datas.updateMenu)
+        return false;
+
+    UpdateMetadata chosenMetadata;
+    if (!resolvePlatformPackage(metadata, chosenMetadata, error))
+    {
+        log(("Update package selection failed: " + error + "\n").c_str());
+        return false;
+    }
+
+    Vec2i mainMonitorPosition;
+    Vec2i mainMonitorSize;
+    datas.monitors.getMainMonitorWorkingArea(mainMonitorPosition, mainMonitorSize);
+
+    Vec2 menuPosition = mainMonitorPosition + mainMonitorSize / 2;
+    datas.updateMenu = std::make_unique<UpdateMenu>(
+        datas, menuPosition, chosenMetadata,
+        [this](GameData& gameData, const UpdateMetadata& packageMetadata) {
+            std::string localError;
+            std::filesystem::path stagedFile;
+
+            if (!downloadAndStageUpdate(packageMetadata, stagedFile, localError))
+            {
+                log(("Download staging failed: " + localError + "\n").c_str());
+                return false;
+            }
+
+            if (!verifyDownloadedPackage(stagedFile, packageMetadata, localError))
+            {
+                log(("Verification failed: " + localError + "\n").c_str());
+                return false;
+            }
+
+            if (!applyPackage(stagedFile, packageMetadata, localError))
+            {
+                log(("Apply update failed: " + localError + "\n").c_str());
+                return false;
+            }
+
+            return true;
+        });
+
+    return true;
+}

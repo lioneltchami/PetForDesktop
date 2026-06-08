@@ -4,8 +4,6 @@
 #include "yaml-cpp/yaml.h"
 
 #include <algorithm>
-#include <cctype>
-#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <errno.h>
@@ -32,45 +30,47 @@ constexpr float kMinTextScale = 0.3f;
 constexpr float kMaxTextScale = 2.f;
 constexpr float kMinGravity = -2000.f;
 constexpr float kMaxGravity = 2000.f;
+constexpr float kMinBounciness = 0.f;
+constexpr float kMaxBounciness = 1.f;
+constexpr float kMinFriction = 0.f;
+constexpr float kMaxFriction = 1.f;
+constexpr float kMinCollisionRatio = 0.f;
+constexpr float kMaxCollisionRatio = 1.f;
+constexpr float kMinPositiveFloat = 0.0001f;
+constexpr int kMinFootBasement = 1;
 
 float clampFloat(float value, float minValue, float maxValue)
 {
-    return std::min(maxValue, std::max(minValue, value));
+    return std::clamp(value, minValue, maxValue);
 }
 
 int clampInt(int value, int minValue, int maxValue)
 {
-    return std::min(maxValue, std::max(minValue, value));
+    return std::clamp(value, minValue, maxValue);
 }
 
-bool startsWith(const std::string& text, const std::string& prefix)
+bool isFiniteFloat(float value)
 {
-    return text.size() >= prefix.size() && text.compare(0, prefix.size(), prefix) == 0;
+    return std::isfinite(value);
 }
 
 bool extractSection(const YAML::Node& root, const char* key, YAML::Node& out)
 {
-    if (root[ key ])
+    if (root[key])
     {
-        out = root[ key ];
+        out = root[key];
         return true;
     }
 
     if (!root.IsSequence())
         return false;
 
-    for (auto item = root.begin(); item != root.end(); ++item)
+    for (const auto& roleItem : root)
     {
-        if (!item->IsMap())
-            continue;
-
-        for (auto it = item->begin(); it != item->end(); ++it)
+        if (roleItem[key])
         {
-            if (it->first.as<std::string>() == key)
-            {
-                out = it->second;
-                return true;
-            }
+            out = roleItem[key];
+            return true;
         }
     }
 
@@ -80,15 +80,16 @@ bool extractSection(const YAML::Node& root, const char* key, YAML::Node& out)
 template <typename T>
 bool readScalar(const YAML::Node& section, const char* key, T& value)
 {
-    if (!section[ key ])
+    const YAML::Node entry = section[key];
+    if (!entry)
         return false;
 
     try
     {
-        value = section[ key ].as<T>();
+        value = entry.as<T>();
         return true;
     }
-    catch (...) // malformed setting value
+    catch (...)
     {
         return false;
     }
@@ -105,7 +106,7 @@ void applyDefaults(GameData& data)
     data.bounciness     = 0.6f;
     data.gravity        = {0.f, 9.81f};
     data.friction       = 0.85f;
-    data.continuousCollisionMaxSqrVelocity = 40.f;
+    data.continuousCollisionMaxSqrVelocity = 1600.f;
     data.collisionPixelRatioStopMovement   = 0.3f;
     data.isGroundedDetection               = 1.f;
     data.releaseImpulse                    = 1.f;
@@ -123,28 +124,35 @@ void applyDefaults(GameData& data)
     data.debugEdgeDetection        = false;
 }
 
-void sanitize(GameData& data)
+void clampAndNormalize(GameData& data)
 {
     data.FPS        = clampInt(data.FPS, kMinFPS, kMaxFPS);
     data.scale      = clampInt(data.scale, kMinScale, kMaxScale);
-    data.textScale  = clampFloat(data.textScale, kMinTextScale, kMaxTextScale);
+    data.textScale  = std::roundf(clampFloat(data.textScale, kMinTextScale, kMaxTextScale) * 10.f) / 10.f;
 
     data.physicFrameRate = clampInt(data.physicFrameRate, kMinPhysicsFrameRate, kMaxPhysicsFrameRate);
 
     data.gravity.x = clampFloat(data.gravity.x, kMinGravity, kMaxGravity);
     data.gravity.y = clampFloat(data.gravity.y, kMinGravity, kMaxGravity);
-    data.gravityDir = data.gravity.sqrLength() > 0.f ? data.gravity.normalized() : Vec2{0.f, 1.f};
+    data.gravityDir = (data.gravity.sqrLength() > 0.f && isFiniteFloat(data.gravity.x) && isFiniteFloat(data.gravity.y))
+                         ? data.gravity.normalized()
+                         : Vec2{0.f, 1.f};
 
-    data.bounciness = clampFloat(data.bounciness, 0.f, 1.f);
-    data.friction   = clampFloat(data.friction, 0.f, 1.f);
+    data.bounciness = clampFloat(data.bounciness, kMinBounciness, kMaxBounciness);
+    data.friction   = clampFloat(data.friction, kMinFriction, kMaxFriction);
     data.continuousCollisionMaxSqrVelocity =
-        std::max(0.f, std::sqrt(std::pow(clampFloat(data.continuousCollisionMaxSqrVelocity, 0.f, FLT_MAX), 2.f));
-    data.footBasementWidth  = std::max(1, data.footBasementWidth);
-    data.footBasementHeight = std::max(1, data.footBasementHeight);
-    data.collisionPixelRatioStopMovement = clampFloat(data.collisionPixelRatioStopMovement, 0.f, 1.f);
-    data.isGroundedDetection           = std::max(0.f, data.isGroundedDetection);
-    data.releaseImpulse                = std::max(0.f, data.releaseImpulse);
-    data.coyoteTimeCursorPos           = std::max(0.f, data.coyoteTimeCursorPos);
+        std::max(kMinPositiveFloat,
+                 data.continuousCollisionMaxSqrVelocity * data.continuousCollisionMaxSqrVelocity);
+
+    data.footBasementWidth  = std::max(kMinFootBasement, data.footBasementWidth);
+    data.footBasementHeight = std::max(kMinFootBasement, data.footBasementHeight);
+    data.collisionPixelRatioStopMovement = clampFloat(data.collisionPixelRatioStopMovement, kMinCollisionRatio, kMaxCollisionRatio);
+    data.isGroundedDetection           = std::max(kMinPositiveFloat, data.isGroundedDetection);
+    data.releaseImpulse                = std::max(kMinPositiveFloat, data.releaseImpulse);
+    data.coyoteTimeCursorPos           = std::max(kMinPositiveFloat, data.coyoteTimeCursorPos);
+
+    if (data.styleName.empty())
+        data.styleName = "PetForDesktop";
 }
 } // namespace
 
@@ -169,76 +177,66 @@ void Setting::importFile(const char* src, GameData& data)
         return;
     }
 
-    YAML::Node gameSection;
-    if (extractSection(root, "Game", gameSection))
+    YAML::Node section;
+
+    if (extractSection(root, "Game", section))
     {
-        readScalar(gameSection["FPS"], "FPS", data.FPS);
-        readScalar(gameSection["RandomSeed"], "RandomSeed", data.randomSeed);
+        readScalar(section, "FPS", data.FPS);
+        readScalar(section, "RandomSeed", data.randomSeed);
     }
 
-    YAML::Node physicSection;
-    if (extractSection(root, "Physic", physicSection))
+    if (extractSection(root, "Physic", section))
     {
-        readScalar(physicSection["PhysicFrameRate"], "PhysicFrameRate", data.physicFrameRate);
-        readScalar(physicSection["Bounciness"], "Bounciness", data.bounciness);
-        readScalar(physicSection["GravityX"], "GravityX", data.gravity.x);
-        readScalar(physicSection["GravityY"], "GravityY", data.gravity.y);
-        readScalar(physicSection["Friction"], "Friction", data.friction);
-        if (physicSection["ContinuousCollisionMaxVelocity"])
-            data.continuousCollisionMaxSqrVelocity = physicSection["ContinuousCollisionMaxVelocity"].as<float>();
-        readScalar(physicSection["FootBasementWidth"], "FootBasementWidth", data.footBasementWidth);
-        readScalar(physicSection["FootBasementHeight"], "FootBasementHeight", data.footBasementHeight);
-        readScalar(physicSection["CollisionPixelRatioStopMovement"], "CollisionPixelRatioStopMovement",
-                 data.collisionPixelRatioStopMovement);
-        readScalar(physicSection["IsGroundedDetection"], "IsGroundedDetection", data.isGroundedDetection);
-        readScalar(physicSection["InputReleaseImpulse"], "InputReleaseImpulse", data.releaseImpulse);
+        readScalar(section, "PhysicFrameRate", data.physicFrameRate);
+        readScalar(section, "Bounciness", data.bounciness);
+        readScalar(section, "GravityX", data.gravity.x);
+        readScalar(section, "GravityY", data.gravity.y);
+        readScalar(section, "Friction", data.friction);
+
+        float maxVelocity = 0.f;
+        if (readScalar(section, "ContinuousCollisionMaxVelocity", maxVelocity))
+            data.continuousCollisionMaxSqrVelocity = maxVelocity;
+
+        readScalar(section, "FootBasementWidth", data.footBasementWidth);
+        readScalar(section, "FootBasementHeight", data.footBasementHeight);
+        readScalar(section, "CollisionPixelRatioStopMovement", data.collisionPixelRatioStopMovement);
+        readScalar(section, "IsGroundedDetection", data.isGroundedDetection);
+        readScalar(section, "InputReleaseImpulse", data.releaseImpulse);
     }
 
-    YAML::Node gamePlaySection;
-    if (extractSection(root, "GamePlay", gamePlaySection))
+    if (extractSection(root, "GamePlay", section))
     {
-        readScalar(gamePlaySection["CoyoteTimeCursorMovement"], "CoyoteTimeCursorMovement", data.coyoteTimeCursorPos);
+        readScalar(section, "CoyoteTimeCursorMovement", data.coyoteTimeCursorPos);
     }
 
-    YAML::Node windowSection;
-    if (extractSection(root, "Window", windowSection))
+    if (extractSection(root, "Window", section))
     {
-        if (windowSection["FullScreenWindow"])
-            readScalar(windowSection["FullScreenWindow"], "FullScreenWindow", data.fullScreenWindow);
-        if (windowSection["ShowWindow"])
-            readScalar(windowSection["ShowWindow"], "ShowWindow", data.showWindow);
-        if (windowSection["ShowFrameBufferBackground"])
-            readScalar(windowSection["ShowFrameBufferBackground"], "ShowFrameBufferBackground",
-                       data.showFrameBufferBackground);
-        if (windowSection["UseForwardWindow"])
-            readScalar(windowSection["UseForwardWindow"], "UseForwardWindow", data.useForwardWindow);
-        if (windowSection["UseMousePassThoughWindow"])
-            readScalar(windowSection["UseMousePassThoughWindow"], "UseMousePassThoughWindow",
-                       data.useMousePassThoughWindow);
+        readScalar(section, "FullScreenWindow", data.fullScreenWindow);
+        readScalar(section, "ShowWindow", data.showWindow);
+        readScalar(section, "ShowFrameBufferBackground", data.showFrameBufferBackground);
+        readScalar(section, "UseForwardWindow", data.useForwardWindow);
+        readScalar(section, "UseMousePassThoughWindow", data.useMousePassThoughWindow);
     }
 
-    YAML::Node styleSection;
-    if (extractSection(root, "Style", styleSection))
+    if (extractSection(root, "Style", section))
     {
-        const auto theme = styleSection["Theme"];
-        if (theme)
-            data.styleName = theme.as<std::string>();
+        std::string theme;
+        if (readScalar(section, "Theme", theme))
+            data.styleName = theme;
     }
 
-    YAML::Node accessibility;
-    if (extractSection(root, "Accessibility", accessibility))
+    if (extractSection(root, "Accessibility", section))
     {
-        readScalar(accessibility["Scale"], "Scale", data.scale);
-        readScalar(accessibility["TextScale"], "TextScale", data.textScale);
+        readScalar(section, "Scale", data.scale);
+        readScalar(section, "TextScale", data.textScale);
     }
 
-    YAML::Node debugSection;
-    if (extractSection(root, "Debug", debugSection))
+    if (extractSection(root, "Debug", section))
     {
-        readScalar(debugSection["ShowEdgeDetection"], "ShowEdgeDetection", data.debugEdgeDetection);
+        readScalar(section, "ShowEdgeDetection", data.debugEdgeDetection);
     }
 
-    sanitize(data);
+    clampAndNormalize(data);
 }
 
 void Setting::exportFile(const char* dest, GameData& data)
@@ -276,8 +274,8 @@ void Setting::exportFile(const char* dest, GameData& data)
         out << YAML::Key << "GravityX" << YAML::Value << data.gravity.x;
         out << YAML::Key << "GravityY" << YAML::Value << data.gravity.y;
         out << YAML::Key << "Friction" << YAML::Value << data.friction;
-        out << YAML::Key << "ContinuousCollisionMaxVelocity" << YAML::Value
-            << std::sqrt(data.continuousCollisionMaxSqrVelocity);
+        const float continuousCollisionMaxVelocity = std::sqrt(data.continuousCollisionMaxSqrVelocity);
+        out << YAML::Key << "ContinuousCollisionMaxVelocity" << YAML::Value << continuousCollisionMaxVelocity;
         out << YAML::Key << "FootBasementWidth" << YAML::Value << data.footBasementWidth;
         out << YAML::Key << "FootBasementHeight" << YAML::Value << data.footBasementHeight;
         out << YAML::Key << "CollisionPixelRatioStopMovement" << YAML::Value << data.collisionPixelRatioStopMovement;
@@ -347,7 +345,13 @@ void Setting::exportFile(const char* dest, GameData& data)
     fclose(file);
 }
 
+bool Setting::sanitize(GameData& data)
+{
+    clampAndNormalize(data);
+    return true;
+}
+
 void Setting::clampForRuntime(GameData& data)
 {
-    sanitize(data);
+    clampAndNormalize(data);
 }

@@ -10,5 +10,7 @@ public:
 
     void exportFile(const char* dest, GameData& data);
 
+    static bool sanitize(GameData& data);
+
     static void clampForRuntime(GameData& data);
 };

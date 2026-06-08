@@ -1,26 +1,32 @@
 #pragma once
 
+#include "Engine/UpdateMetadata.hpp"
 #include "Engine/Vector2.hpp"
 #include "Game/GameData.hpp"
 #include "Game/UIMenu.hpp"
 
+#include <functional>
+#include <string>
+#include <vector>
+
 class UpdateMenu : public UIMenu
 {
 protected:
-    std::string content;
-    std::string changelog;
+    UpdateMetadata m_metadata;
+    std::string    changelog;
     std::vector<std::string> lines;
     std::string windowName;
+    std::string statusText;
 
-protected:
-    static void changeFileExtension(char* file_name);
+    std::function<bool(GameData&, const UpdateMetadata&)> m_onInstall;
 
-    static void generateAndLoadFile(const char* data, size_t count);
-
-        static std::string markdownToPlainText(const std::string& markdown);
+    void appendStatus(const std::string& message);
 
 public:
-    UpdateMenu(GameData& inDatas, Vec2 inPositionn, const char* content, const char* version);
+    UpdateMenu(GameData& inDatas, Vec2 inPosition, const UpdateMetadata& metadata,
+               std::function<bool(GameData&, const UpdateMetadata&)> onInstall);
+
+    virtual ~UpdateMenu() = default;
 
     void update(double deltaTime);
 };

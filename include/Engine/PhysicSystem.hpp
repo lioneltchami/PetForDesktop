@@ -53,10 +53,10 @@ public:
         int                screenOverlapCount = 0;
 
         // 1: Check if pet is outside of all monitors
-        for (const auto& monitorItem : monitorsTopology)
-        {
-            bool isOutsideOfCurrentMonitor =
-                isRectDisjointRectB(comp.getRect().getPosition(), comp.getRect().getSize(), monitorItem.position, monitorItem.size);
+            for (const auto& monitorItem : monitorsTopology)
+            {
+                bool isOutsideOfCurrentMonitor =
+                    isRectDisjointRectB(comp.getRect().getPosition(), comp.getRect().getSize(), monitorItem.position, monitorItem.size);
             bool iInsideOfCurrentMonitor =
                 isRectAInsideRectB(comp.getRect().getPosition(), comp.getRect().getSize(), monitorItem.position, monitorItem.size);
 

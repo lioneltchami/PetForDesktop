@@ -2,46 +2,27 @@
 
 #include "Engine/Log.hpp"
 #include "Engine/Singleton.hpp"
-#include "Game/UpdateMenu.hpp"
+#include "Engine/UpdateMetadata.hpp"
+#include "Game/GameData.hpp"
 
-#include <cpr/cpr.h>
-#include <regex>
+#include <filesystem>
+#include <string>
 
 class Updater : public Singleton<Updater>
 {
 public:
-    void checkForUpdate(GameData& datas)
-    {
-        cpr::Response response =
-            cpr::Get(cpr::Url{"https://api.github.com/repos/Renardjojo/PetDesktop/releases/latest"});
-        if (response.error)
-        {
-            log((response.error.message + "\n").c_str());
-            return;
-        }
+    bool checkForUpdate(GameData& datas);
 
-        std::string json = response.text;
-        std::regex  pattern("\"tag_name\":\\s*\"(.*?)\"");
-        std::smatch matches;
+    bool isVersionAvailable(const std::string& currentTag, const std::string& remoteTag) const;
 
-        if (std::regex_search(json, matches, pattern))
-        {
-            if (matches[1] != "v" PROJECT_VERSION)
-            {
-                if (!datas.updateMenu)
-                {
-                    Vec2i mainMonitorPosition;
-                    Vec2i mainMonitorSize;
-                    datas.monitors.getMainMonitorWorkingArea(mainMonitorPosition, mainMonitorSize);
+    bool fetchReleaseMetadata(UpdateMetadata& metadata, std::string& error);
 
-                    Vec2 menuPosition = mainMonitorPosition + mainMonitorSize / 2;
-                    datas.updateMenu  = std::make_unique<UpdateMenu>(datas, menuPosition, json.c_str(), matches[1].str().c_str());
-                }
-            }
-             else
-            {
-                 logf("The version %s is the latest\n", PROJECT_VERSION);
-            }
-        }
-    }
+    bool resolvePlatformPackage(const UpdateMetadata& metadata, UpdateMetadata& resolved, std::string& error) const;
+
+    bool downloadAndStageUpdate(const UpdateMetadata& metadata, std::filesystem::path& stagedFile, std::string& error) const;
+
+    bool verifyDownloadedPackage(const std::filesystem::path& stagedFile, const UpdateMetadata& metadata,
+                                std::string& error) const;
+
+    bool applyPackage(const std::filesystem::path& stagedFile, const UpdateMetadata& metadata, std::string& error) const;
 };
