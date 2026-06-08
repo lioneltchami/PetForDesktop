@@ -4,6 +4,18 @@
 #include "Engine/Log.hpp"
 #include "Engine/Graphics/WindowOGL.hpp"
 #include "Game/Pet.hpp"
+#include "Engine/Monitors.hpp"
+
+namespace
+{
+Monitors* g_windowMonitors = nullptr;
+
+void glfwMonitorConnectionCallback(GLFWmonitor* monitor, int event)
+{
+    if (g_windowMonitors != nullptr)
+        g_windowMonitors->onMonitorConnectionChanged(monitor, event);
+}
+}
 
 void WindowGLFW::initGLFW()
 {
@@ -56,6 +68,12 @@ void WindowGLFW::initWindow(GameData& datas)
     glfwShowWindow(window);
 
     glfwSetWindowPos(window, m_position.x, m_position.y);
+}
+
+void WindowGLFW::setMonitorCallback(Monitors* monitors)
+{
+    g_windowMonitors = monitors;
+    glfwSetMonitorCallback(monitors ? glfwMonitorConnectionCallback : nullptr);
 }
 
 void cursorPositionCallback(GLFWwindow* window, double x, double y)

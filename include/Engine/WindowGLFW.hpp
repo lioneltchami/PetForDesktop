@@ -6,6 +6,8 @@
 
 #include <GLFW/glfw3.h>
 
+class Monitors;
+
 void cursorPositionCallback(GLFWwindow* window, double x, double y);
 void mousButtonCallBack(GLFWwindow* window, int button, int action, int mods);
 void processInput(GLFWwindow* window);
@@ -52,6 +54,8 @@ public:
         Canvas::setSize(windowSize);
         glfwSetWindowSize(window, windowSize.x, windowSize.y);
     }
+
+    void setMonitorCallback(Monitors* monitors);
 
     void setPosition(const Vec2 windowPos) noexcept
     {

@@ -79,6 +79,7 @@ public:
         datas.window = std::make_unique<Window>();
         datas.window->init(datas);
         datas.monitors.init();
+        datas.window->setMonitorCallback(&datas.monitors);
         Vec2i monitorSize    = datas.monitors.getMonitorsSize();
         Vec2i monitorsSizeMM = datas.monitors.getMonitorPhysicalSize();
 
