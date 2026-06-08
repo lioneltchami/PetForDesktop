@@ -6,6 +6,7 @@
 #include "imgui.h"
 
 #include <cpr/cpr.h>
+#include <cstdio>
 #include <regex>
 #include <string>
 
@@ -47,9 +48,9 @@ void UpdateMenu::generateAndLoadFile(const char* data, size_t count)
     fwrite(data, sizeof(char), count, temp_file);
     fclose(temp_file);
 
-    SystemOpen(temp_file_name)
+    SystemOpen(temp_file_name);
 
-        unlink(temp_file_name);
+        std::remove(temp_file_name);
     exit(0);
 }
 

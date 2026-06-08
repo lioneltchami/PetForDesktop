@@ -1,5 +1,6 @@
 #include "Game/Game.hpp"
 
+#ifdef _WIN32
 // Disable usage of external GPU
 #ifdef __cplusplus
 extern "C"
@@ -10,6 +11,7 @@ extern "C"
 
 #ifdef __cplusplus
 }
+#endif
 #endif
 
 // Disable console

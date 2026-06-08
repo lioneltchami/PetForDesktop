@@ -1,14 +1,6 @@
 #pragma once
 
-#include "Engine/ScreenShoot.hpp"
-#include "Engine/MonitorTopologyCache.hpp"
-
-#ifdef USE_OPENGL_API
-#include "Engine/Graphics/TextureOGL.hpp"
-#include "Engine/Graphics/FramebufferOGL.hpp"
-#include "Engine/Graphics/ShaderOGL.hpp"
-#include "Engine/Graphics/ScreenSpaceQuadOGL.hpp"
-#endif // USE_OPENGL_API
+#include "Engine/WorldSamplingSubsystem.hpp"
 
 #include "Engine/Vector2.hpp"
 #include "Engine/PhysicComponent.hpp"
@@ -53,10 +45,8 @@ public:
 
     void computeMonitorCollisions(PhysicComponent& comp)
     {
-        if (data.monitorTopologySnapshot.empty())
-            return;
-
-        const std::vector<MonitorTopologyItem>& monitorsTopology = data.monitorTopologySnapshot;
+        const std::vector<MonitorTopologyItem> monitorsTopology =
+            data.worldSampling ? data.worldSampling->getMonitorTopologySnapshot() : std::vector<MonitorTopologyItem>{};
         if (monitorsTopology.empty())
             return;
         bool               isOutside          = true;
@@ -130,145 +120,12 @@ public:
         }
     }
 
-    void updateCollisionTexture(const PhysicComponent& comp, const Vec2 prevToNewWinPos)
-    {
-        int screenShootPosX, screenShootPosY, screenShootSizeX, screenShootSizeY;
-        if (data.debugEdgeDetection)
-        {
-            screenShootPosX  = 0;
-            screenShootPosY  = 0;
-            screenShootSizeX = data.window->getSize().x;
-            screenShootSizeY = data.window->getSize().y;
-        }
-        else
-        {
-            const float xPadding = prevToNewWinPos.x < 0.f ? prevToNewWinPos.x : 0.f;
-            const float yPadding = prevToNewWinPos.y < 0.f ? prevToNewWinPos.y : 0.f;
-
-            screenShootPosX  = static_cast<int>(comp.getRect().getPosition().x + comp.getRect().getSize().x / 2.f + xPadding -
-                                               data.footBasementWidth / 2.f);
-            screenShootPosY  = static_cast<int>(comp.getRect().getPosition().y + comp.getRect().getSize().y + 1 + yPadding -
-                                               data.footBasementHeight / 2.f);
-            screenShootSizeX = static_cast<int>(abs(prevToNewWinPos.x) + data.footBasementWidth);
-            screenShootSizeY = static_cast<int>(abs(prevToNewWinPos.y) + data.footBasementHeight);
-        }
-
-        ScreenShoot              screenshoot(screenShootPosX, screenShootPosY, screenShootSizeX, screenShootSizeY);
-        const ScreenShoot::Data& pxlData = screenshoot.get();
-
-        data.pCollisionTexture     = std::make_unique<Texture>(pxlData.bits, pxlData.width, pxlData.height, 4);
-        data.pEdgeDetectionTexture = std::make_unique<Texture>(pxlData.width, pxlData.height, 4);
-
-#if USE_OPENGL_API
-        glDisable(GL_BLEND);
-        glViewport(0, 0, pxlData.width, pxlData.height);
-#endif
-
-        if (data.edgeDetectionShaders.size() == 1)
-        {
-            data.pFramebuffer->bind();
-            data.pFramebuffer->attachTexture(*data.pEdgeDetectionTexture);
-
-            data.edgeDetectionShaders[0]->use();
-            data.edgeDetectionShaders[0]->setInt("uTexture", 0);
-            data.edgeDetectionShaders[0]->setVec2("resolution", static_cast<float>(pxlData.width),
-                                                 static_cast<float>(pxlData.height));
-            data.pCollisionTexture->use();
-            data.pFullScreenQuad->use();
-            data.pFullScreenQuad->draw();
-        }
-        else
-        {
-            data.pFramebuffer->bind();
-            data.pFramebuffer->attachTexture(*data.pCollisionTexture);
-
-            data.edgeDetectionShaders[0]->use();
-            data.edgeDetectionShaders[0]->setInt("uTexture", 0);
-            data.pCollisionTexture->use();
-            data.pFullScreenQuad->use();
-            data.pFullScreenQuad->draw();
-
-            data.pFramebuffer->bind();
-            data.pFramebuffer->attachTexture(*data.pEdgeDetectionTexture);
-
-            data.edgeDetectionShaders[1]->use();
-            data.edgeDetectionShaders[1]->setInt("uTexture", 0);
-            data.edgeDetectionShaders[1]->setVec2("resolution", static_cast<float>(pxlData.width),
-                                                 static_cast<float>(pxlData.height));
-            data.pCollisionTexture->use();
-            data.pFullScreenQuad->use();
-            data.pFullScreenQuad->draw();
-        }
-    }
-
-    bool processContinuousCollision(const PhysicComponent& comp, const Vec2 prevToNewWinPos, Vec2& newPos)
-    {
-        // Main idear is the we will take a screen shoot of the dimension of the velocity vector (depending on it's
-        // magnitude)
-        // Thanks to this texture, we will iterate on pixel base on velocity vector to check collision
-        // Screen shoot will be post processed with edge detection alogorythm to have only white and bblack values.
-        // White will be the collision
-
-        if (prevToNewWinPos.sqrLength() == 0.f)
-            return false;
-
-        updateCollisionTexture(comp, prevToNewWinPos);
-
-        std::vector<unsigned char> pixels;
-        data.pEdgeDetectionTexture->use();
-        data.pEdgeDetectionTexture->getPixels(pixels);
-
-        int dataPerPixel = data.pEdgeDetectionTexture->getChannelsCount();
-
-        bool iterationOnX = abs(prevToNewWinPos.x) > abs(prevToNewWinPos.y);
-        Vec2 prevToNewWinPosDir;
-
-        if (iterationOnX)
-        {
-            prevToNewWinPosDir = prevToNewWinPos / sqrtf(prevToNewWinPos.x * prevToNewWinPos.x);
-        }
-        else
-        {
-            prevToNewWinPosDir = prevToNewWinPos / sqrtf(prevToNewWinPos.y * prevToNewWinPos.y);
-        }
-
-        int width  = data.pEdgeDetectionTexture->getWidth();
-        int height = data.pEdgeDetectionTexture->getHeight();
-
-        float row    = prevToNewWinPosDir.y < 0.f ? height - data.footBasementHeight : 0.f;
-        float column = prevToNewWinPosDir.x < 0.f ? width - data.footBasementWidth : 0.f;
-
-        int iterationCount = iterationOnX ? width - data.footBasementWidth : height - data.footBasementHeight;
-        for (int i = 0; i < iterationCount + 1; i++)
-        {
-            float count = 0;
-
-            for (int y = 0; y < data.footBasementHeight; y++)
-            {
-                for (int x = 0; x < data.footBasementWidth; x++)
-                {
-                    // flip Y and find index
-                    int rowFlipped = height - 1 - (int)row - y;
-                    int index      = (rowFlipped * width + (int)column + x) * dataPerPixel;
-                    count += pixels[index] == 255;
-                }
-            }
-            count /= data.footBasementWidth * data.footBasementHeight;
-
-            if (count > data.collisionPixelRatioStopMovement)
-            {
-                newPos = comp.getRect().getPosition() + Vec2(column, row);
-                return true;
-            }
-            row += prevToNewWinPosDir.y;
-            column += prevToNewWinPosDir.x;
-        }
-        return false;
-    }
-
     bool CatpureScreenCollision(const PhysicComponent& comp, const Vec2 prevToNewWinPos, Vec2& newPos)
     {
-        return processContinuousCollision(comp, prevToNewWinPos, newPos);
+        if (!data.worldSampling)
+            return false;
+
+        return data.worldSampling->checkSurfaceCollision(const_cast<PhysicComponent&>(comp), prevToNewWinPos, newPos, data);
     }
 
     void update(PhysicComponent& comp, InteractionComponent& interactionComp, double deltaTime)

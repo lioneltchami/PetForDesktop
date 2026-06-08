@@ -6,6 +6,7 @@
 #include "Engine/Settings.hpp"
 #include "Engine/SpriteSheet.hpp"
 #include "Engine/StylePanel.hpp"
+#include "Engine/WorldSamplingSubsystem.hpp"
 #include "Game/ContextualMenu.hpp"
 #include "Game/SettingMenu.hpp"
 #include "Game/UpdateMenu.hpp"
@@ -16,6 +17,7 @@
 #include "Engine/Graphics/ScreenSpaceQuadOGL.hpp"
 #include "Engine/Graphics/ShaderOGL.hpp"
 #include "Engine/Graphics/TextureOGL.hpp"
+#include "Engine/Graphics/FramebufferOGL.hpp"
 #endif // USE_OPENGL_API
 
 #include "Engine/TimeManager.hpp"
@@ -28,8 +30,11 @@
 #include "imgui.h"
 
 #include <GLFW/glfw3.h>
+#include <filesystem>
 
 #include <functional>
+
+namespace fs = std::filesystem;
 
 class Game
 {
@@ -83,7 +88,8 @@ public:
         datas.monitorTopology = std::make_unique<MonitorTopologyCache>(nullptr, 1.0 / 12.0);
         datas.monitorTopology->attachHotplugBridge(&datas.monitors);
         datas.monitorTopology->forceRefresh(datas.timeAcc);
-        datas.monitorTopologySnapshot = datas.monitorTopology->getSnapshot();
+        datas.worldSampling = std::make_unique<WorldSamplingSubsystem>(datas.monitorTopology.get(), 1.0 / 12.0);
+        datas.worldSampling->update(datas.timeAcc);
         Vec2i monitorSize    = datas.monitors.getMonitorsSize();
         Vec2i monitorsSizeMM = datas.monitors.getMonitorPhysicalSize();
 
@@ -204,11 +210,8 @@ public:
         TimeManager::instance().setFrameRate(1);
         TimeManager::instance().emplaceTimer(
             [&]() {
-                if (datas.monitorTopology)
-                {
-                    if (datas.monitorTopology->refreshIfNeeded(datas.timeAcc))
-                        datas.monitorTopologySnapshot = datas.monitorTopology->getSnapshot();
-                }
+                if (datas.worldSampling)
+                    datas.worldSampling->update(datas.timeAcc);
             },
             1.0 / 12.0, true);
 
@@ -334,11 +337,8 @@ public:
             1.f / datas.physicFrameRate, true);
         TimeManager::instance().emplaceTimer(
             [&]() {
-                if (datas.monitorTopology)
-                {
-                    if (datas.monitorTopology->refreshIfNeeded(datas.timeAcc))
-                        datas.monitorTopologySnapshot = datas.monitorTopology->getSnapshot();
-                }
+                if (datas.worldSampling)
+                    datas.worldSampling->update(datas.timeAcc);
             },
             1.0 / 12.0, true);
 

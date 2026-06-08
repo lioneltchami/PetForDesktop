@@ -6,14 +6,17 @@
 #include "Game/Pet.hpp"
 #include "Engine/Monitors.hpp"
 
+#include <atomic>
+
 namespace
 {
-Monitors* g_windowMonitors = nullptr;
+std::atomic<Monitors*> g_windowMonitors{nullptr};
 
 void glfwMonitorConnectionCallback(GLFWmonitor* monitor, int event)
 {
-    if (g_windowMonitors != nullptr)
-        g_windowMonitors->onMonitorConnectionChanged(monitor, event);
+    Monitors* currentMonitors = g_windowMonitors.load(std::memory_order_acquire);
+    if (currentMonitors != nullptr)
+        currentMonitors->onMonitorConnectionChanged(monitor, event);
 }
 }
 
@@ -72,7 +75,7 @@ void WindowGLFW::initWindow(GameData& datas)
 
 void WindowGLFW::setMonitorCallback(Monitors* monitors)
 {
-    g_windowMonitors = monitors;
+    g_windowMonitors.store(monitors, std::memory_order_release);
     glfwSetMonitorCallback(monitors ? glfwMonitorConnectionCallback : nullptr);
 }
 
