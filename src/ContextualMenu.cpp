@@ -80,23 +80,27 @@ void ContextualMenu::update(double deltaTime)
         ImVec2(datas.pDiscordLogo->getWidth() * imageRatio, datas.pDiscordLogo->getHeight() * imageRatio);
     ImVec2 imageTextPadding = ImVec2(ImGui::GetStyle().FramePadding.x * 2, -1);
 
-    if (ImGui::ImageButtonWithTextRight(reinterpret_cast<ImTextureID>(datas.pDiscordLogo->getID()), "Join us!",
+    if (ImGui::ImageButtonWithTextRight(static_cast<ImTextureID>(datas.pDiscordLogo->getID()),
+                                        "Join us!",
                                         imageSize, sizeButton, imageTextPadding))
     {
-        SystemOpen("https://discord.gg/gjdQmHAp7e") shouldClose = true;
+        SystemOpen("https://discord.gg/gjdQmHAp7e");
+        shouldClose = true;
     }
 
     imageRatio = ImGui::GetTextLineHeight() / datas.pPatreonLogo->getHeight();
     imageSize  = ImVec2(datas.pPatreonLogo->getWidth() * imageRatio, datas.pPatreonLogo->getHeight() * imageRatio);
-    if (ImGui::ImageButtonWithTextRight(reinterpret_cast<ImTextureID>(datas.pPatreonLogo->getID()),
+    if (ImGui::ImageButtonWithTextRight(static_cast<ImTextureID>(datas.pPatreonLogo->getID()),
                                         "Support this project", imageSize, sizeButton, imageTextPadding))
     {
-        SystemOpen("https://www.patreon.com/PetForDesktop") shouldClose = true;
+        SystemOpen("https://www.patreon.com/PetForDesktop");
+        shouldClose = true;
     }
 
     if (ImGui::Button("Bug report", sizeButton))
     {
-        SystemOpen("https://github.com/Renardjojo/PetForDesktop/issues/new/choose") shouldClose = true;
+        SystemOpen("https://github.com/Renardjojo/PetForDesktop/issues/new/choose");
+        shouldClose = true;
     }
 
     if (ImGui::Button("Exit", sizeButton))
@@ -106,7 +110,7 @@ void ContextualMenu::update(double deltaTime)
 
     std::string txt = std::format("{:.1f} FPS", ImGui::GetIO().Framerate);
     ImGui::SetNextTextLayout(txt.c_str(), 0.5, 0);
-    ImGui::Text(txt.c_str());
+    ImGui::Text("%s", txt.c_str());
     windowEnd();
     ImGui::End();
 }

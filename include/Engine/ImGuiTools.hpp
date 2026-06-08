@@ -4,6 +4,8 @@
 #include "imgui_internal.h" //ImGuiItemFlags_Disabled, PushItemFlag
 #include "Engine/FileExplorer.hpp"
 
+#include <cstdint>
+
 // Thank's to : https://github.com/ocornut/imgui/issues/211#issuecomment-812293268
 namespace ImGui
 {
@@ -39,13 +41,13 @@ inline void SetNextElementLayout(float xWindowSizeRatio, float yWindowSizeRatio,
                                  EHAlign hItemAlign = EHAlign::Middle, EVAlign vItemAlign = EVAlign::Middle)
 {
     if (hItemAlign != EHAlign::None)
-        SetCursorPosX(GetStyle().FramePadding.x + GetCurrentWindow()->Viewport->WorkOffsetMin.x +
-                      (GetWindowSize().x - GetCurrentWindow()->Viewport->WorkOffsetMin.x) * xWindowSizeRatio -
+        SetCursorPosX(GetStyle().FramePadding.x + GetCurrentWindow()->Viewport->WorkInsetMin.x +
+                      (GetWindowSize().x - GetCurrentWindow()->Viewport->WorkInsetMin.x) * xWindowSizeRatio -
                       size.x * (int)hItemAlign * 0.01f);
 
     if (vItemAlign != EVAlign::None)
-        SetCursorPosY(GetCurrentWindow()->Viewport->WorkOffsetMin.y +
-                      (GetWindowSize().y - GetCurrentWindow()->Viewport->WorkOffsetMin.y) * yWindowSizeRatio -
+        SetCursorPosY(GetCurrentWindow()->Viewport->WorkInsetMin.y +
+                      (GetWindowSize().y - GetCurrentWindow()->Viewport->WorkInsetMin.y) * yWindowSizeRatio -
                       size.y * (int)vItemAlign * 0.01f);
 }
 
@@ -68,6 +70,20 @@ inline void RenderRectFilledRangeV(ImDrawList* draw_list, const ImRect& rect, Im
 
     ImVec2 p0 = ImVec2(rect.Min.x, ImLerp(rect.Min.y, rect.Max.y, y_start_norm));
     ImVec2 p1 = ImVec2(rect.Max.x, ImLerp(rect.Min.y, rect.Max.y, y_end_norm));
+
+    draw_list->AddRectFilled(p0, p1, col, rounding);
+}
+
+inline void RenderRectFilledRangeH(ImDrawList* draw_list, const ImRect& rect, ImU32 col, float x_start_norm,
+                                   float x_end_norm, float rounding)
+{
+    if (x_end_norm == x_start_norm)
+        return;
+    if (x_start_norm > x_end_norm)
+        ImSwap(x_start_norm, x_end_norm);
+
+    ImVec2 p0 = ImVec2(ImLerp(rect.Min.x, rect.Max.x, x_start_norm), rect.Min.y);
+    ImVec2 p1 = ImVec2(ImLerp(rect.Min.x, rect.Max.x, x_end_norm), rect.Max.y);
 
     draw_list->AddRectFilled(p0, p1, col, rounding);
 }
@@ -106,8 +122,8 @@ inline void displayBar(float current, float max, const ImVec2& size_arg, float r
     bb.Min.y += borderSize;
     window->DrawList->AddRectFilled(bb.Min, bb.Max, bgColor, rounding);
     window->DrawList->AddRect(bb.Min - ImVec2(halfBorderSize, halfBorderSize),
-                              bb.Max + ImVec2(halfBorderSize, halfBorderSize), borderColor, rounding,
-                              ImDrawFlags_RoundCornersAll, borderSize);
+                              bb.Max + ImVec2(halfBorderSize, halfBorderSize), borderColor, rounding, borderSize,
+                              ImDrawFlags_RoundCornersAll);
 
     bb.Expand(ImVec2(-style.FrameBorderSize, -style.FrameBorderSize));
     const ImVec2 fill_br = ImVec2(ImLerp(bb.Min.x, bb.Max.x, fraction), bb.Max.y);
@@ -130,6 +146,7 @@ inline void displayBar(float current, float max, const ImVec2& size_arg, float r
 
 // https://github.com/ocornut/imgui/issues/1096#issuecomment-293544142
 // Definition (.cpp file. Not sure if it needs "imgui_internal.h" or not)
+
 inline IMGUI_API bool ImageButtonWithTextRight(ImTextureID texId, const char* label,
                                                const ImVec2& imageSize  = ImVec2(0, 0),
                                                const ImVec2& buttonSize = ImVec2(0, 0), ImVec2 padding = ImVec2(-1, -1),
@@ -152,7 +169,7 @@ inline IMGUI_API bool ImageButtonWithTextRight(ImTextureID texId, const char* la
             size.x = GetTextLineHeightWithSpacing();
         else if (size.y <= 0)
             size.y = GetTextLineHeightWithSpacing();
-        size *= window->FontWindowScale * GetIO().FontGlobalScale;
+        size *= window->FontWindowScale;
     }
 
     ImGuiContext&     g     = *GImGui;
@@ -225,7 +242,7 @@ inline IMGUI_API void ImageWithTextRight(ImTextureID texId, const char* label, c
             size.x = size.y;
         else if (size.y <= 0)
             size.y = size.x;
-        size *= window->FontWindowScale * GetIO().FontGlobalScale;
+        size *= window->FontWindowScale;
     }
 
     ImGuiContext&     g     = *GImGui;
