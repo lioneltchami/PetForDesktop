@@ -83,6 +83,7 @@ public:
         datas.monitorTopology = std::make_unique<MonitorTopologyCache>(nullptr, 1.0 / 12.0);
         datas.monitorTopology->attachHotplugBridge(&datas.monitors);
         datas.monitorTopology->forceRefresh(datas.timeAcc);
+        datas.monitorTopologySnapshot = datas.monitorTopology->getSnapshot();
         Vec2i monitorSize    = datas.monitors.getMonitorsSize();
         Vec2i monitorsSizeMM = datas.monitors.getMonitorPhysicalSize();
 
@@ -204,7 +205,10 @@ public:
         TimeManager::instance().emplaceTimer(
             [&]() {
                 if (datas.monitorTopology)
-                    datas.monitorTopology->refreshIfNeeded(datas.timeAcc);
+                {
+                    if (datas.monitorTopology->refreshIfNeeded(datas.timeAcc))
+                        datas.monitorTopologySnapshot = datas.monitorTopology->getSnapshot();
+                }
             },
             1.0 / 12.0, true);
 
@@ -331,7 +335,10 @@ public:
         TimeManager::instance().emplaceTimer(
             [&]() {
                 if (datas.monitorTopology)
-                    datas.monitorTopology->refreshIfNeeded(datas.timeAcc);
+                {
+                    if (datas.monitorTopology->refreshIfNeeded(datas.timeAcc))
+                        datas.monitorTopologySnapshot = datas.monitorTopology->getSnapshot();
+                }
             },
             1.0 / 12.0, true);
 

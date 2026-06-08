@@ -22,6 +22,7 @@ struct GameData
     std::unique_ptr<class ContextualMenu>   contextualMenu;
     std::unique_ptr<class SettingMenu>      settingMenu;
     std::unique_ptr<class UpdateMenu>      updateMenu;
+    std::vector<MonitorTopologyItem>        monitorTopologySnapshot;
 
     bool shouldUpdateFrame = true;
 

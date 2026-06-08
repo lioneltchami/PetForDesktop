@@ -53,7 +53,10 @@ public:
 
     void computeMonitorCollisions(PhysicComponent& comp)
     {
-        const std::vector<MonitorTopologyItem> monitorsTopology = data.monitorTopology ? data.monitorTopology->getSnapshot() : std::vector<MonitorTopologyItem>{};
+        if (data.monitorTopologySnapshot.empty())
+            return;
+
+        const std::vector<MonitorTopologyItem>& monitorsTopology = data.monitorTopologySnapshot;
         if (monitorsTopology.empty())
             return;
         bool               isOutside          = true;
