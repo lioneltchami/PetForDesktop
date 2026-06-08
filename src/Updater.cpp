@@ -521,6 +521,8 @@ bool parseManifestFromText(const std::string& manifestText, UpdateMetadata& meta
         if (!normalizedChecksum.empty())
         {
             metadata.checksum = normalizedChecksum;
+            if (metadata.checksumAlgorithm.empty())
+                metadata.checksumAlgorithm = "sha256";
             hasAny         = true;
         }
     }

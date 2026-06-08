@@ -123,7 +123,7 @@ void UpdateMenu::update(double deltaTime)
         }
     }
 
-    if (!m_isMetadataValid)
+    if (!canInstall)
         ImGui::EndDisabled();
 
     windowEnd();

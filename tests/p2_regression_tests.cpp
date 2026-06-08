@@ -367,6 +367,7 @@ bool test_settings_validation_hardening()
 
 bool test_update_metadata_validation()
 {
+    const std::string validChecksum(64, 'a');
     const auto fail = [](const char* step) {
         std::cout << "update_metadata_validation fail: " << step << "\n";
         return false;
@@ -376,7 +377,9 @@ bool test_update_metadata_validation()
     std::string error;
 
     // Good manifest-like payload
-    if (!Updater::parseManifestForTest("{\"package\":\"https://github.com/example/app-v1.exe\",\"checksum\":\"abcdef\"}", metadata))
+    if (!Updater::parseManifestForTest(
+            (std::string("{\"package\":\"https://github.com/example/app-v1.exe\",\"checksum\":\"") + validChecksum + "\"}").c_str(),
+            metadata))
         return fail("parse valid manifest");
 
     if (metadata.checksumAlgorithm != "sha256")
@@ -473,6 +476,68 @@ bool test_cursor_normalization_for_mixed_scale()
 
     return true;
 }
+
+bool test_cursor_normalization_for_scale_variants()
+{
+    auto monitorEnumerator = std::make_unique<FakeWindowEnumerator>();
+    monitorEnumerator->addMonitor({{0, 0}, {1920, 1080}, {400, 225}, {1.f, 1.f}});
+    monitorEnumerator->addMonitor({{1920, 0}, {1920, 1080}, {384, 216}, {1.25f, 1.25f}});
+    monitorEnumerator->addMonitor({{3840, 0}, {1536, 1536}, {307, 173}, {1.5f, 1.5f}});
+
+    Monitors monitors(std::move(monitorEnumerator));
+
+    const auto fail = [](const char* step) {
+        std::cout << "cursor_normalization_for_scale_variants fail: " << step << "\n";
+        return false;
+    };
+
+    const auto runScaleCase = [&](const Vec2& logicalWindowPos, const Vec2& logicalWindowSize, const float scale) {
+        const Vec2 physicalWindowSize{static_cast<float>(static_cast<int>(logicalWindowSize.x * scale)),
+                                     static_cast<float>(static_cast<int>(logicalWindowSize.y * scale))};
+        const Vec2 logicalInput{96.f, 44.f};
+        const Vec2 physicalInput{logicalInput.x * scale, logicalInput.y * scale};
+
+        auto normalize = [&](const Vec2& cursor) {
+            return monitors.normalizeWindowCursor(cursor,
+                                                 {logicalWindowPos, logicalWindowSize, physicalWindowSize, 0.0001f, 0.0001f});
+        };
+
+        const Vec2 logicalResult = normalize(logicalInput);
+        if (!near(logicalResult.x, logicalInput.x) || !near(logicalResult.y, logicalInput.y))
+            return false;
+
+        const Vec2 outsidePhysical = physicalWindowSize + Vec2{32.f, 16.f};
+        const Vec2 outsideResult = normalize(outsidePhysical);
+        if (!std::isfinite(outsideResult.x) || !std::isfinite(outsideResult.y) || outsideResult.x < 0.f || outsideResult.y < 0.f)
+            return false;
+
+        if (scale > 1.f && (physicalInput.x > logicalWindowSize.x || physicalInput.y > logicalWindowSize.y))
+        {
+            const Vec2 physicalResult = normalize(physicalInput);
+            if (!near(physicalResult.x, logicalInput.x) || !near(physicalResult.y, logicalInput.y))
+                return false;
+        }
+        else
+        {
+            const Vec2 passthroughResult = normalize(physicalInput);
+            if (!near(passthroughResult.x, physicalInput.x) || !near(passthroughResult.y, physicalInput.y))
+                return false;
+        }
+
+        return true;
+    };
+
+    if (!runScaleCase({10.f, 10.f}, {180.f, 90.f}, 1.f))
+        return fail("100% scale variant");
+
+    if (!runScaleCase({1520.f, 30.f}, {320.f, 160.f}, 1.25f))
+        return fail("125% scale variant");
+
+    if (!runScaleCase({3900.f, -700.f}, {320.f, 240.f}, 1.5f))
+        return fail("150% scale variant");
+
+    return true;
+}
 } // namespace
 
 int main()
@@ -483,6 +548,7 @@ int main()
         {"settings_validation_hardening", test_settings_validation_hardening},
         {"update_metadata_validation", test_update_metadata_validation},
         {"cursor_normalization_for_mixed_scale", test_cursor_normalization_for_mixed_scale},
+        {"cursor_normalization_for_scale_variants", test_cursor_normalization_for_scale_variants},
     };
 
     int failed = 0;

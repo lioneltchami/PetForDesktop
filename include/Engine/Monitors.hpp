@@ -494,9 +494,17 @@ public:
             options.windowPixelSize.x > 0.f ? static_cast<float>(options.windowPixelSize.x) : logicalSize.x,
             options.windowPixelSize.y > 0.f ? static_cast<float>(options.windowPixelSize.y) : logicalSize.y};
 
-        const bool cursorLooksPhysical = !logicalInside || (options.windowPixelSize.x > 0.f && options.windowPixelSize.y > 0.f);
+        const bool hasPixelWindowMetrics =
+            options.windowPixelSize.x > 0.f && options.windowPixelSize.y > 0.f && options.windowPixelSize.x > 1.f &&
+            options.windowPixelSize.y > 1.f;
         const bool cursorInsidePhysical = isInsideRect(cursorPos, inferredPixelSize);
-        if (!cursorLooksPhysical && !cursorInsidePhysical)
+        const bool cursorLooksPhysical = hasPixelWindowMetrics && !logicalInside && cursorInsidePhysical;
+        if (!cursorLooksPhysical && !logicalInside)
+        {
+            return {std::clamp(cursorPos.x, 0.f, logicalSize.x), std::clamp(cursorPos.y, 0.f, logicalSize.y)};
+        }
+
+        if (!cursorLooksPhysical && logicalInside)
             return cursorPos;
 
         Vec2 cursorBest = cursorPos;
