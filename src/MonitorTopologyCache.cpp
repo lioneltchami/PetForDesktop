@@ -9,6 +9,27 @@ void MonitorTopologyCache::bindMonitors(const Monitors* monitors)
     m_isDirty   = true;
 }
 
+void MonitorTopologyCache::attachHotplugBridge(Monitors* monitors)
+{
+    detachHotplugBridge();
+    bindMonitors(monitors);
+    if (!monitors)
+        return;
+    monitors->setTopologyChangedCallback([this]() { markDirty(); });
+    m_hotplugMonitors = monitors;
+}
+
+void MonitorTopologyCache::detachHotplugBridge()
+{
+    Monitors* callbackMonitors = m_hotplugMonitors;
+    m_hotplugMonitors         = nullptr;
+    if (callbackMonitors)
+        callbackMonitors->clearTopologyChangedCallback();
+
+    std::lock_guard lock{m_mutex};
+    m_isDirty = true;
+}
+
 void MonitorTopologyCache::markDirty()
 {
     std::lock_guard lock{m_mutex};

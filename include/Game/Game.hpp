@@ -80,8 +80,8 @@ public:
         datas.window->init(datas);
         datas.monitors.init();
         datas.window->setMonitorCallback(&datas.monitors);
-        datas.monitorTopology = std::make_unique<MonitorTopologyCache>(&datas.monitors, 1.0 / 12.0);
-        datas.monitors.setTopologyChangedCallback([&]() { datas.monitorTopology->markDirty(); });
+        datas.monitorTopology = std::make_unique<MonitorTopologyCache>(nullptr, 1.0 / 12.0);
+        datas.monitorTopology->attachHotplugBridge(&datas.monitors);
         datas.monitorTopology->forceRefresh(datas.timeAcc);
         Vec2i monitorSize    = datas.monitors.getMonitorsSize();
         Vec2i monitorsSizeMM = datas.monitors.getMonitorPhysicalSize();
@@ -151,7 +151,8 @@ public:
 
     ~Game()
     {
-        datas.monitors.clearTopologyChangedCallback();
+        if (datas.monitorTopology)
+            datas.monitorTopology->detachHotplugBridge();
         if (datas.window)
             datas.window->setMonitorCallback(nullptr);
         cleanUI();

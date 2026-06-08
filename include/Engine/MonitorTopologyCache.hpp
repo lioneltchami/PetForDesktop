@@ -17,6 +17,7 @@ class MonitorTopologyCache
 {
 protected:
     const Monitors* m_monitors = nullptr;
+    Monitors*       m_hotplugMonitors = nullptr;
     mutable std::mutex m_mutex;
     std::vector<MonitorTopologyItem> m_monitorsSnapshot;
     double m_sampleIntervalSeconds;
@@ -35,6 +36,10 @@ public:
     }
 
     void bindMonitors(const Monitors* monitors);
+
+    void attachHotplugBridge(Monitors* monitors);
+
+    void detachHotplugBridge();
 
     void markDirty();
 
