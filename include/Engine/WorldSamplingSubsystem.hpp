@@ -19,6 +19,7 @@ protected:
         Vec2i capturePosition = Vec2i::zero();
         int   captureWidth    = 0;
         int   captureHeight   = 0;
+        Vec2  captureScale    = Vec2::one();
         int   channels        = 0;
         bool  valid           = false;
         double lastSampleTime  = 0.0;
@@ -52,6 +53,8 @@ public:
 
     bool hasValidSample(const PhysicComponent& comp) const;
     void onMonitorTopologyChanged();
+
+    Vec2 getMonitorScaleForPosition(const Vec2& position, const Vec2 defaultScale = Vec2::one()) const;
 
     std::vector<MonitorTopologyItem> getMonitorTopologySnapshot() const;
 

@@ -9,4 +9,6 @@ public:
     void importFile(const char* src, GameData& data);
 
     void exportFile(const char* dest, GameData& data);
+
+    static void clampForRuntime(GameData& data);
 };

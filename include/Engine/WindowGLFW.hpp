@@ -69,7 +69,7 @@ public:
     void setPositionSize(const Vec2 windowPos, const Vec2 windowSize) noexcept
     {
         setPosition(windowPos);
-        setSize(windowPos);
+        setSize(windowSize);
     }
 
     inline bool shouldClose() const noexcept

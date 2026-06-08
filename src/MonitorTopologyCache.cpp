@@ -82,8 +82,13 @@ void MonitorTopologyCache::sampleNow()
         MonitorTopologyItem topology;
         m_monitors->getMonitorPosition(i, topology.position);
         m_monitors->getMonitorSize(i, topology.size);
+        m_monitors->getMonitorScale(i, topology.contentScale);
         if (topology.size.x == 0 || topology.size.y == 0)
             continue;
+
+        if (topology.contentScale.x <= 0.f || topology.contentScale.y <= 0.f)
+            topology.contentScale = Vec2::one();
+
         m_monitorsSnapshot.emplace_back(topology);
     }
 }

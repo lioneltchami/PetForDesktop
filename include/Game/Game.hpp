@@ -116,8 +116,18 @@ public:
                                                   });
         datas.monitorTopology->forceRefresh(datas.timeAcc);
         datas.worldSampling->update(datas.timeAcc);
-        Vec2i monitorSize    = datas.monitors.getMonitorsSize();
-        Vec2i monitorsSizeMM = datas.monitors.getMonitorPhysicalSize();
+        Vec2i monitorPos;
+        Vec2i monitorSize;
+        Vec2i monitorSizeMM;
+        datas.monitors.getMonitorPosition(0, monitorPos);
+        datas.monitors.getMonitorSize(0, monitorSize);
+        monitorSizeMM = datas.monitors.getMonitorPhysicalSize(0);
+
+        if (monitorSize.sqrLength() == 0)
+            monitorSize = datas.monitors.getMonitorsSize();
+
+        if (monitorSizeMM.sqrLength() == 0)
+            monitorSizeMM = datas.monitors.getMonitorPhysicalSize();
 
         if (datas.fullScreenWindow)
         {
@@ -129,8 +139,11 @@ public:
         }
 
         // Evaluate pixel distance based on dpi and monitor size
-        datas.pixelPerMeter = {(float)monitorSize.x / (monitorsSizeMM.x * 0.001f),
-                               (float)monitorSize.y / (monitorsSizeMM.y * 0.001f)};
+        if (monitorSizeMM.x > 0 && monitorSizeMM.y > 0)
+        {
+            datas.pixelPerMeter = {(float)monitorSize.x / (monitorSizeMM.x * 0.001f),
+                                   (float)monitorSize.y / (monitorSizeMM.y * 0.001f)};
+        }
 
         datas.interactionSystem = std::make_unique<InteractionSystem>();
 

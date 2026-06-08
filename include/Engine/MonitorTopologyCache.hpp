@@ -12,6 +12,7 @@ struct MonitorTopologyItem
 {
     Vec2i position;
     Vec2i size;
+    Vec2  contentScale = Vec2::one();
 };
 
 class MonitorTopologyCache

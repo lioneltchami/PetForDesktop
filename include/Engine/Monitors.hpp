@@ -4,6 +4,7 @@
 #include "Engine/Platform/PlatformServices.hpp"
 #include "Engine/Vector2.hpp"
 
+#include <cmath>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -90,6 +91,20 @@ public:
         return m_enumerator->getMonitorsSize();
     }
 
+    Vec2 getMonitorScale(int index, Vec2 defaultScale = Vec2::one()) const
+    {
+        Vec2 scale = defaultScale;
+        std::lock_guard lock{m_mutex};
+        if (!m_enumerator)
+            return scale;
+
+        m_enumerator->getMonitorContentScale(index, scale);
+        if (scale.x <= 0.f || scale.y <= 0.f || !std::isfinite(scale.x) || !std::isfinite(scale.y))
+            return defaultScale;
+
+        return scale;
+    }
+
     void getMonitorPosition(int index, Vec2i& position) const
     {
         std::lock_guard lock{m_mutex};
@@ -112,6 +127,14 @@ public:
         if (!m_enumerator)
             return Vec2i::zero();
         return m_enumerator->getMonitorPhysicalSize();
+    }
+
+    Vec2i getMonitorPhysicalSize(int index) const
+    {
+        std::lock_guard lock{m_mutex};
+        if (!m_enumerator)
+            return Vec2i::zero();
+        return m_enumerator->getMonitorPhysicalSize(index);
     }
 
     int getMonitorsCount() const

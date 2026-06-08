@@ -31,14 +31,14 @@ public:
         return dotGravityVelocity > 0.8 && velocityLength < data.isGroundedDetection;
     }
 
-    static bool isRectDisjointRectB(const Vec2i posA, const Vec2i sizeA, const Vec2i posB, const Vec2i sizeB)
+    static bool isRectDisjointRectB(const Vec2 posA, const Vec2 sizeA, const Vec2 posB, const Vec2 sizeB)
     {
         // Check if the rectangles are disjoint (i.e. do not overlap)
         return posA.x + sizeA.x < posB.x || posA.x > posB.x + sizeB.x || posA.y + sizeA.y < posB.y ||
                posA.y > posB.y + sizeB.y;
     }
 
-    static bool isRectAInsideRectB(const Vec2i posA, const Vec2i sizeA, const Vec2i posB, const Vec2i sizeB)
+    static bool isRectAInsideRectB(const Vec2 posA, const Vec2 sizeA, const Vec2 posB, const Vec2 sizeB)
     {
         return posA.x > posB.x && posA.x + sizeA.x < posB.x + sizeB.x && posA.y > posB.y && posA.y + sizeA.y < posB.y + sizeB.y;
     }

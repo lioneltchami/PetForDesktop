@@ -7,8 +7,10 @@
 #include "Engine/ScreenShoot.hpp"
 #include "Game/GameData.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
+#include <string>
 #include <utility>
 
 namespace
@@ -119,23 +121,36 @@ bool WorldSamplingSubsystem::refreshCollisionSample(GameData& data, const Physic
     if (data.debugEdgeDetection && (!data.pFullScreenQuad || !data.pFramebuffer))
         return false;
 
-    Vec2 capturePos = computeCapturePositionX(comp, prevToNewWinPos, data);
-    Vec2i captureSize = computeCaptureSize(prevToNewWinPos, data);
+    const Vec2 capturePosLogical = computeCapturePositionX(comp, prevToNewWinPos, data);
+    const Vec2i captureSizeLogical = computeCaptureSize(prevToNewWinPos, data);
+    Vec2       captureScale = getMonitorScaleForPosition(capturePosLogical);
+    if (captureScale.x <= 0.f || captureScale.y <= 0.f)
+        captureScale = Vec2::one();
+
+    Vec2i captureSizePhysical;
+    Vec2  capturePositionPhysical = capturePosLogical * captureScale;
 
     if (data.debugEdgeDetection)
     {
-        capturePos.x   = 0.f;
-        capturePos.y   = 0.f;
-        captureSize.x  = data.window->getSize().x;
-        captureSize.y  = data.window->getSize().y;
+        capturePositionPhysical.x = 0.f;
+        capturePositionPhysical.y = 0.f;
+        captureSizePhysical.x =
+            std::max(1, static_cast<int>(std::round(static_cast<float>(data.window->getSize().x) * captureScale.x)));
+        captureSizePhysical.y =
+            std::max(1, static_cast<int>(std::round(static_cast<float>(data.window->getSize().y) * captureScale.y)));
+    }
+    else
+    {
+        captureSizePhysical.x = std::max(1, static_cast<int>(std::round(static_cast<float>(captureSizeLogical.x) * captureScale.x)));
+        captureSizePhysical.y = std::max(1, static_cast<int>(std::round(static_cast<float>(captureSizeLogical.y) * captureScale.y)));
     }
 
-    const int screenShootPosX = static_cast<int>(capturePos.x);
-    const int screenShootPosY = static_cast<int>(capturePos.y);
-    if (captureSize.x <= 0 || captureSize.y <= 0)
+    if (captureSizePhysical.x <= 0 || captureSizePhysical.y <= 0)
         return false;
 
-    ScreenShoot screenshoot(screenShootPosX, screenShootPosY, captureSize.x, captureSize.y);
+    const int screenShootPosX = std::max(0, static_cast<int>(std::floor(capturePositionPhysical.x)));
+    const int screenShootPosY = std::max(0, static_cast<int>(std::floor(capturePositionPhysical.y)));
+    ScreenShoot screenshoot(screenShootPosX, screenShootPosY, captureSizePhysical.x, captureSizePhysical.y);
     const ScreenShoot::Data& pxlData = screenshoot.get();
 
     auto collisionTexture = std::make_unique<Texture>(pxlData.bits, pxlData.width, pxlData.height, 4);
@@ -186,6 +201,7 @@ bool WorldSamplingSubsystem::refreshCollisionSample(GameData& data, const Physic
     sample.capturePosition = {screenShootPosX, screenShootPosY};
     sample.captureWidth    = pxlData.width;
     sample.captureHeight   = pxlData.height;
+    sample.captureScale    = captureScale;
     sample.channels        = edgeTexture->getChannelsCount();
     sample.pixels          = std::move(pixels);
     sample.valid           = true;
@@ -205,27 +221,37 @@ bool WorldSamplingSubsystem::testCollisionWithCachedSurface(const SurfaceCollisi
     if (!sample.valid || sample.pixels.empty() || sample.channels <= 0)
         return false;
 
-    const bool iterationOnX = fabs(prevToNewWinPos.x) > fabs(prevToNewWinPos.y);
+    const Vec2 scaledMovement = prevToNewWinPos * sample.captureScale;
+    const bool iterationOnX = fabs(scaledMovement.x) > fabs(scaledMovement.y);
     Vec2       prevToNewWinPosDir;
     if (iterationOnX)
-        prevToNewWinPosDir = prevToNewWinPos / sqrtf(prevToNewWinPos.x * prevToNewWinPos.x);
+    {
+        const float length = sqrtf(scaledMovement.x * scaledMovement.x);
+        prevToNewWinPosDir = length > 0.f ? (scaledMovement / length) : Vec2::zero();
+    }
     else
-        prevToNewWinPosDir = prevToNewWinPos / sqrtf(prevToNewWinPos.y * prevToNewWinPos.y);
+    {
+        const float length = sqrtf(scaledMovement.y * scaledMovement.y);
+        prevToNewWinPosDir = length > 0.f ? (scaledMovement / length) : Vec2::zero();
+    }
 
-    float row    = prevToNewWinPosDir.y < 0.f ? sample.captureHeight - data.footBasementHeight : 0.f;
-    float column = prevToNewWinPosDir.x < 0.f ? sample.captureWidth - data.footBasementWidth : 0.f;
+    const int basementWidth = std::max(1, static_cast<int>(std::round(data.footBasementWidth * sample.captureScale.x)));
+    const int basementHeight =
+        std::max(1, static_cast<int>(std::round(data.footBasementHeight * sample.captureScale.y)));
 
-    const int iterationCount = iterationOnX ? sample.captureWidth - data.footBasementWidth
-                                           : sample.captureHeight - data.footBasementHeight;
+    float row    = prevToNewWinPosDir.y < 0.f ? sample.captureHeight - basementHeight : 0.f;
+    float column = prevToNewWinPosDir.x < 0.f ? sample.captureWidth - basementWidth : 0.f;
+
+    const int iterationCount = iterationOnX ? sample.captureWidth - basementWidth : sample.captureHeight - basementHeight;
     if (iterationCount <= 0)
         return false;
 
     for (int i = 0; i < iterationCount + 1; i++)
     {
-        float count = 0;
-        for (int y = 0; y < data.footBasementHeight; y++)
+        float count = 0.f;
+        for (int y = 0; y < basementHeight; y++)
         {
-            for (int x = 0; x < data.footBasementWidth; x++)
+            for (int x = 0; x < basementWidth; x++)
             {
                 const int pixelX = static_cast<int>(column) + x;
                 const int pixelY = static_cast<int>(row) + y;
@@ -233,18 +259,18 @@ bool WorldSamplingSubsystem::testCollisionWithCachedSurface(const SurfaceCollisi
                 if (pixelX < 0 || pixelY < 0 || pixelX >= sample.captureWidth || pixelY >= sample.captureHeight)
                     continue;
 
-                const int index = pixelIndex(pixelX, sample.captureHeight - 1 - pixelY, sample.captureWidth,
-                                            sample.channels);
-                if (index >= 0 && index < static_cast<int>(sample.pixels.size()) &&
-                    sample.pixels[index] == 255)
+                const int index = pixelIndex(pixelX, sample.captureHeight - 1 - pixelY, sample.captureWidth, sample.channels);
+                if (index >= 0 && index < static_cast<int>(sample.pixels.size()) && sample.pixels[index] == 255)
                     count += 1.f;
             }
         }
 
-        count /= data.footBasementWidth * data.footBasementHeight;
+        count /= static_cast<float>(basementWidth * basementHeight);
         if (count > data.collisionPixelRatioStopMovement)
         {
-            newPos = comp.getRect().getPosition() + Vec2(column, row);
+            const float denomX = std::max(sample.captureScale.x, 0.0001f);
+            const float denomY = std::max(sample.captureScale.y, 0.0001f);
+            newPos = comp.getRect().getPosition() + Vec2(column / denomX, row / denomY);
             return true;
         }
 
@@ -253,4 +279,24 @@ bool WorldSamplingSubsystem::testCollisionWithCachedSurface(const SurfaceCollisi
     }
 
     return false;
+}
+
+Vec2 WorldSamplingSubsystem::getMonitorScaleForPosition(const Vec2& position, const Vec2 defaultScale)
+{
+    std::lock_guard lock{m_mutex};
+    for (const auto& monitor : m_topologyState.monitorSnapshot)
+    {
+        const Vec2 monitorPos{static_cast<float>(monitor.position.x), static_cast<float>(monitor.position.y)};
+        const Vec2 monitorSize{static_cast<float>(monitor.size.x), static_cast<float>(monitor.size.y)};
+        if (position.x >= monitorPos.x && position.x < monitorPos.x + monitorSize.x && position.y >= monitorPos.y &&
+            position.y < monitorPos.y + monitorSize.y)
+        {
+            return monitor.contentScale;
+        }
+    }
+
+    if (!m_topologyState.monitorSnapshot.empty())
+        return m_topologyState.monitorSnapshot.front().contentScale;
+
+    return defaultScale;
 }

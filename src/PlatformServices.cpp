@@ -5,6 +5,7 @@
 #include <GLFW/glfw3.h>
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <vector>
@@ -78,6 +79,19 @@ public:
         getMonitorSize(0, size);
     }
 
+    void getMonitorContentScale(int index, Vec2& scale) const override
+    {
+        scale = Vec2::one();
+        if (index < 0 || index >= static_cast<int>(monitors.size()))
+            return;
+
+        float xScale = 1.f;
+        float yScale = 1.f;
+        glfwGetMonitorContentScale(monitors[index], &xScale, &yScale);
+        if (xScale > 0.f && yScale > 0.f)
+            scale = {xScale, yScale};
+    }
+
     Vec2i getMonitorsSize() const override
     {
         Vec2i size = Vec2i::zero();
@@ -86,8 +100,12 @@ public:
             const GLFWvidmode* currentVideoMode = glfwGetVideoMode(monitors[i]);
             if (currentVideoMode)
             {
-                size.x += currentVideoMode->width;
-                size.y += currentVideoMode->height;
+                Vec2 scale{1.f, 1.f};
+                getMonitorContentScale(i, scale);
+                const float invScaleX = 1.f / scale.x;
+                const float invScaleY = 1.f / scale.y;
+                size.x += static_cast<int>(std::round(currentVideoMode->width * invScaleX));
+                size.y += static_cast<int>(std::round(currentVideoMode->height * invScaleY));
             }
         }
         return size;
@@ -108,8 +126,10 @@ public:
         const GLFWvidmode* currentVideoMode = glfwGetVideoMode(monitors[index]);
         if (currentVideoMode)
         {
-            size.x = currentVideoMode->width;
-            size.y = currentVideoMode->height;
+            Vec2 scale{1.f, 1.f};
+            getMonitorContentScale(index, scale);
+            size.x = static_cast<int>(std::round(currentVideoMode->width / std::max(scale.x, 0.01f)));
+            size.y = static_cast<int>(std::round(currentVideoMode->height / std::max(scale.y, 0.01f)));
         }
     }
 
@@ -125,6 +145,17 @@ public:
             sizeMM.y += height_mm;
         }
         return sizeMM;
+    }
+
+    Vec2i getMonitorPhysicalSize(int index) const override
+    {
+        if (index < 0 || index >= static_cast<int>(monitors.size()))
+            return Vec2i::zero();
+
+        int widthMM  = 0;
+        int heightMM = 0;
+        glfwGetMonitorPhysicalSize(monitors[index], &widthMM, &heightMM);
+        return {widthMM, heightMM};
     }
 };
 

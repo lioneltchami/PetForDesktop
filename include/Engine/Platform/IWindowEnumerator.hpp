@@ -17,9 +17,13 @@ public:
 
     virtual Vec2i getMonitorsSize() const = 0;
 
+    virtual void getMonitorContentScale(int index, Vec2& scale) const = 0;
+
     virtual void getMonitorPosition(int index, Vec2i& position) const = 0;
 
     virtual void getMonitorSize(int index, Vec2i& size) const = 0;
 
     virtual Vec2i getMonitorPhysicalSize() const = 0;
+
+    virtual Vec2i getMonitorPhysicalSize(int index) const = 0;
 };
