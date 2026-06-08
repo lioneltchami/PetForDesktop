@@ -15,6 +15,7 @@ SettingMenu::SettingMenu(GameData& inDatas, Pet& inPet, Vec2 inPosition)
 SettingMenu::~SettingMenu()
 {
     Setting::ValidationReport report;
+    Setting::sanitize(datas);
     if (!Setting::validateForRuntime(datas, report))
     {
         for (const auto& errorItem : report.errors)

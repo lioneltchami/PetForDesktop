@@ -17,6 +17,8 @@ protected:
     std::vector<std::string> lines;
     std::string windowName;
     std::string statusText;
+    bool        m_isMetadataValid = true;
+    std::string m_metadataError;
 
     std::function<bool(GameData&, const UpdateMetadata&)> m_onInstall;
 

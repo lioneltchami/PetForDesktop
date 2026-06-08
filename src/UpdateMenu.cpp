@@ -2,6 +2,7 @@
 
 #include "Engine/StylePanel.hpp"
 #include "Engine/Log.hpp"
+#include "Engine/Updater.hpp"
 
 #include <algorithm>
 #include <sstream>
@@ -12,6 +13,13 @@ UpdateMenu::UpdateMenu(GameData& inDatas, Vec2 inPosition, const UpdateMetadata&
 {
     windowName = std::string(PROJECT_NAME " ") + metadata.tag + " is available.";
     changelog  = metadata.releaseNotes;
+    m_metadata = metadata;
+
+    m_isMetadataValid = Updater::instance().validateMetadataEnvelope(m_metadata, m_metadataError);
+    if (m_isMetadataValid && !metadata.signature.empty())
+    {
+        m_isMetadataValid = Updater::instance().verifySignedMetadata(m_metadata, m_metadataError);
+    }
 
     // Normalize markdown formatting to plain text for quick display in ImGui.
     std::string current;
@@ -58,6 +66,11 @@ void UpdateMenu::update(double deltaTime)
     if (!m_metadata.signature.empty())
         ImGui::Text("Signed metadata detected");
 
+    if (!m_isMetadataValid)
+    {
+        ImGui::TextColored(ImVec4(1.f, 0.3f, 0.3f, 1.f), "Invalid update metadata: %s", m_metadataError.c_str());
+    }
+
     if (!changelog.empty())
     {
         ImGui::Separator();
@@ -79,6 +92,9 @@ void UpdateMenu::update(double deltaTime)
 
     ImGui::Separator();
 
+    if (!m_isMetadataValid)
+        ImGui::BeginDisabled();
+
     if (ImGui::Button("Update", ImVec2(ImGui::GetContentRegionAvail().x, 0.f)))
     {
         if (!m_metadata.packageUrl.empty() && m_onInstall)
@@ -98,6 +114,9 @@ void UpdateMenu::update(double deltaTime)
             appendStatus("No valid package URL to install.");
         }
     }
+
+    if (!m_isMetadataValid)
+        ImGui::EndDisabled();
 
     windowEnd();
     ImGui::End();

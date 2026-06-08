@@ -427,6 +427,8 @@ bool parseAssetList(const std::string& releaseJson, std::vector<UpdateAssetMetad
 
 bool parseManifestFromText(const std::string& manifestText, UpdateMetadata& metadata)
 {
+    metadata = UpdateMetadata{};
+
     bool hasAny = false;
     bool packageFieldPresent = false;
 
@@ -590,7 +592,7 @@ bool validateMetadataEnvelope(const UpdateMetadata& metadata, std::string& error
         return false;
     }
 
-    if (metadata.packageUrl.empty() && metadata.packageName.empty())
+    if (metadata.packageUrl.empty() && metadata.packageName.empty() && metadata.assets.empty())
     {
         error = "Metadata missing package download target";
         return false;
@@ -610,12 +612,19 @@ bool validateMetadataEnvelope(const UpdateMetadata& metadata, std::string& error
 
     if (!metadata.checksum.empty())
     {
+        const std::string checksumAlgorithm = toLowerAscii(metadata.checksumAlgorithm);
         std::string checksum = metadata.checksum;
         checksum.erase(std::remove_if(checksum.begin(), checksum.end(), [](char c) { return c == ' ' || c == '\t'; }),
                       checksum.end());
-        if (metadata.checksumAlgorithm.empty())
+        if (checksumAlgorithm.empty())
         {
             error = "Checksum algorithm missing";
+            return false;
+        }
+
+        if (checksumAlgorithm != "sha256")
+        {
+            error = "Unsupported checksum algorithm";
             return false;
         }
 
@@ -664,7 +673,7 @@ bool validateMetadataEnvelope(const UpdateMetadata& metadata, std::string& error
         if (signatureAlgorithm == "sha256")
         {
             if (!metadata.checksum.empty() && !metadata.checksumAlgorithm.empty() &&
-                metadata.checksumAlgorithm != "sha256")
+                toLowerAscii(metadata.checksumAlgorithm) != "sha256")
             {
                 error = "SHA256 signature requires checksum algorithm sha256";
                 return false;
@@ -928,7 +937,8 @@ bool isChecksumValid(const std::filesystem::path& stagedFile, const UpdateMetada
     if (metadata.checksum.empty())
         return false;
 
-    if (metadata.checksumAlgorithm != "sha256" && metadata.checksumAlgorithm != "SHA256")
+    const std::string checksumAlgorithm = toLowerAscii(metadata.checksumAlgorithm);
+    if (checksumAlgorithm != "sha256")
     {
         logf("Unsupported checksum algorithm '%s'\n", metadata.checksumAlgorithm.c_str());
         return false;
@@ -941,6 +951,16 @@ bool isChecksumValid(const std::filesystem::path& stagedFile, const UpdateMetada
     }
 
     return true;
+}
+
+bool Updater::validateMetadataEnvelope(const UpdateMetadata& metadata, std::string& error) const
+{
+    return validateMetadataEnvelope(metadata, error);
+}
+
+bool Updater::verifySignedMetadata(const UpdateMetadata& metadata, std::string& error) const
+{
+    return verifySignedMetadata(metadata, error);
 }
 } // namespace
 
@@ -995,14 +1015,17 @@ bool Updater::fetchReleaseMetadata(UpdateMetadata& metadata, std::string& error)
         }
     }
 
-    if (manifestResolved && !metadata.packageUrl.empty())
+    if (manifestResolved)
     {
         metadata.packageName = sanitizeFileName(metadata.packageName.empty() ? extractFilenameFromUrl(metadata.packageUrl) : metadata.packageName);
     }
-    else
+    else if (!metadata.packageUrl.empty())
     {
-        metadata.packageName.clear();
+        metadata.packageName = sanitizeFileName(extractFilenameFromUrl(metadata.packageUrl));
     }
+
+    if (!metadata.packageUrl.empty() && metadata.packageName.empty())
+        metadata.packageName = sanitizeFileName(extractFilenameFromUrl(metadata.packageUrl));
 
     if (!validateMetadataEnvelope(metadata, error))
         return false;
@@ -1089,6 +1112,7 @@ bool Updater::downloadAndStageUpdate(const UpdateMetadata& metadata, std::filesy
     const std::string fileName = metadata.packageName.empty() ? std::string("PetForDesktop-Update.bin") : metadata.packageName;
     const auto        safeName = sanitizeFileName(fileName);
     const std::filesystem::path stagedPath = stageDir / safeName;
+    const std::filesystem::path stagedBackup = stagedPath.string() + ".bak";
 
     const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                            std::chrono::system_clock::now().time_since_epoch())
@@ -1118,16 +1142,44 @@ bool Updater::downloadAndStageUpdate(const UpdateMetadata& metadata, std::filesy
         }
     }
 
-    std::error_code replaceError;
-    std::filesystem::remove(stagedPath, replaceError);
-
     std::error_code renameError;
-    std::filesystem::rename(stagedPartPath, stagedPath, renameError);
-    if (renameError)
+    const bool hadExisting = std::filesystem::exists(stagedPath);
+
+    if (hadExisting)
     {
-        removeQuietly(stagedPartPath);
-        error = renameError.message();
-        return false;
+        std::error_code backupError;
+        std::filesystem::rename(stagedPath, stagedBackup, backupError);
+        if (backupError)
+        {
+            removeQuietly(stagedPartPath);
+            error = backupError.message();
+            return false;
+        }
+
+        std::filesystem::rename(stagedPartPath, stagedPath, renameError);
+        if (renameError)
+        {
+            removeQuietly(stagedPartPath);
+            std::error_code restoreError;
+            std::filesystem::rename(stagedBackup, stagedPath, restoreError);
+            if (restoreError)
+                error = restoreError.message() + " | " + renameError.message();
+            else
+                error = renameError.message();
+            return false;
+        }
+
+        removeQuietly(stagedBackup);
+    }
+    else
+    {
+        std::filesystem::rename(stagedPartPath, stagedPath, renameError);
+        if (renameError)
+        {
+            removeQuietly(stagedPartPath);
+            error = renameError.message();
+            return false;
+        }
     }
 
     stagedFile = stagedPath;

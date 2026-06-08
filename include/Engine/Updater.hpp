@@ -19,6 +19,10 @@ public:
 
     bool resolvePlatformPackage(const UpdateMetadata& metadata, UpdateMetadata& resolved, std::string& error) const;
 
+    bool validateMetadataEnvelope(const UpdateMetadata& metadata, std::string& error) const;
+
+    bool verifySignedMetadata(const UpdateMetadata& metadata, std::string& error) const;
+
     bool downloadAndStageUpdate(const UpdateMetadata& metadata, std::filesystem::path& stagedFile, std::string& error) const;
 
     bool verifyDownloadedPackage(const std::filesystem::path& stagedFile, const UpdateMetadata& metadata,

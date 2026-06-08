@@ -193,8 +193,12 @@ public:
             if (localPixelPerMeter.x <= 0.f || localPixelPerMeter.y <= 0.f ||
                 !std::isfinite(localPixelPerMeter.x) || !std::isfinite(localPixelPerMeter.y))
             {
-                localPixelPerMeter = data.pixelPerMeter;
+                localPixelPerMeter = data.monitors.getPixelPerMeterForLogicalPoint(comp.getRect().getPosition(), data.pixelPerMeter);
             }
+        }
+        else
+        {
+            localPixelPerMeter = data.monitors.getPixelPerMeterForLogicalPoint(comp.getRect().getPosition(), data.pixelPerMeter);
         }
 
         // Apply gravity if not selected

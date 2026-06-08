@@ -48,7 +48,13 @@ constexpr float kMaxFriction = 1.f;
 constexpr float kMinCollisionRatio = 0.f;
 constexpr float kMaxCollisionRatio = 1.f;
 constexpr float kMinPositiveFloat = 0.0001f;
+constexpr float kMinContinuousCollisionMaxVelocity = 0.1f;
+constexpr float kMaxContinuousCollisionMaxVelocity = 200.f;
 constexpr int kMinFootBasement = 1;
+constexpr int kMaxFootBasement = 1024;
+constexpr float kMaxCoyoteTime = 5.f;
+constexpr float kMaxReleaseImpulse = 100.f;
+constexpr float kMaxIsGroundedDetection = 10.f;
 constexpr std::size_t kMaxThemeNameLength = 64;
 constexpr std::size_t kMaxImportFileBytes = 1024u * 1024u;
 
@@ -329,14 +335,14 @@ void clampAndNormalize(GameData& data)
                                                 kMinPositiveFloat, 200.f, kMinPositiveFloat));
     data.continuousCollisionMaxSqrVelocity = data.continuousCollisionMaxSqrVelocity * data.continuousCollisionMaxSqrVelocity;
 
-    data.footBasementWidth = std::max(kMinFootBasement, data.footBasementWidth);
-    data.footBasementHeight = std::max(kMinFootBasement, data.footBasementHeight);
+    data.footBasementWidth  = std::clamp(data.footBasementWidth, kMinFootBasement, kMaxFootBasement);
+    data.footBasementHeight = std::clamp(data.footBasementHeight, kMinFootBasement, kMaxFootBasement);
 
     data.collisionPixelRatioStopMovement = clampFloat(data.collisionPixelRatioStopMovement, kMinCollisionRatio, kMaxCollisionRatio,
                                                     0.3f);
-    data.isGroundedDetection = std::max(kMinPositiveFloat, data.isGroundedDetection);
-    data.releaseImpulse     = std::max(kMinPositiveFloat, data.releaseImpulse);
-    data.coyoteTimeCursorPos = std::max(kMinPositiveFloat, data.coyoteTimeCursorPos);
+    data.isGroundedDetection = std::clamp(data.isGroundedDetection, kMinPositiveFloat, kMaxIsGroundedDetection);
+    data.releaseImpulse      = std::clamp(data.releaseImpulse, kMinPositiveFloat, kMaxReleaseImpulse);
+    data.coyoteTimeCursorPos = std::clamp(data.coyoteTimeCursorPos, kMinPositiveFloat, kMaxCoyoteTime);
 
     if (data.styleName.empty())
         data.styleName = "PetForDesktop";
@@ -355,6 +361,12 @@ bool validateForRuntime(const GameData& data, Setting::ValidationReport& report)
     if (!isInRange(data.textScale, kMinTextScale, kMaxTextScale))
     {
         addValidationIssue(report, std::string(), "Accessibility", "TextScale", "Out of range text scale", false);
+        valid = false;
+    }
+
+    if (!isInRange(data.scale, kMinScale, kMaxScale))
+    {
+        addValidationIssue(report, std::string(), "Accessibility", "Scale", "Out of range accessibility scale", false);
         valid = false;
     }
 
@@ -377,7 +389,42 @@ bool validateForRuntime(const GameData& data, Setting::ValidationReport& report)
         valid = false;
     }
 
-    if (data.footBasementWidth < kMinFootBasement || data.footBasementHeight < kMinFootBasement)
+    if (data.continuousCollisionMaxSqrVelocity < 0.f || !std::isfinite(data.continuousCollisionMaxSqrVelocity))
+    {
+        addValidationIssue(report, std::string(), "Physic", "ContinuousCollisionMaxVelocity", "Invalid collision velocity", false);
+        valid = false;
+    }
+    else
+    {
+        const float collisionMaxVelocity = std::sqrt(data.continuousCollisionMaxSqrVelocity);
+        if (!isInRange(collisionMaxVelocity, kMinContinuousCollisionMaxVelocity, kMaxContinuousCollisionMaxVelocity))
+        {
+            addValidationIssue(report, std::string(), "Physic", "ContinuousCollisionMaxVelocity",
+                             "Out of range continuous collision velocity", false);
+            valid = false;
+        }
+    }
+
+    if (!isInRange(data.releaseImpulse, kMinPositiveFloat, kMaxReleaseImpulse))
+    {
+        addValidationIssue(report, std::string(), "Physic", "InputReleaseImpulse", "Out of range release impulse", false);
+        valid = false;
+    }
+
+    if (!isInRange(data.isGroundedDetection, kMinPositiveFloat, kMaxIsGroundedDetection))
+    {
+        addValidationIssue(report, std::string(), "Physic", "IsGroundedDetection", "Out of range grounded detection", false);
+        valid = false;
+    }
+
+    if (!isInRange(data.coyoteTimeCursorPos, kMinPositiveFloat, kMaxCoyoteTime))
+    {
+        addValidationIssue(report, std::string(), "GamePlay", "CoyoteTimeCursorMovement", "Out of range coyote time", false);
+        valid = false;
+    }
+
+    if (data.footBasementWidth < kMinFootBasement || data.footBasementWidth > kMaxFootBasement ||
+        data.footBasementHeight < kMinFootBasement || data.footBasementHeight > kMaxFootBasement)
     {
         addValidationIssue(report, std::string(), "Physic", "FootBasement", "Foot basement is below minimum size", false);
         valid = false;
