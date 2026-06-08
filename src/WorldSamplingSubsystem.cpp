@@ -77,6 +77,16 @@ bool WorldSamplingSubsystem::hasValidSample(const PhysicComponent& comp) const
     return it != m_surfaceSamples.end() && it->second.valid;
 }
 
+void WorldSamplingSubsystem::onMonitorTopologyChanged()
+{
+    std::lock_guard lock{m_mutex};
+    m_surfaceSamples.clear();
+    if (m_monitorTopology)
+    {
+        m_topologyState.monitorSnapshot = m_monitorTopology->getSnapshot();
+    }
+}
+
 bool WorldSamplingSubsystem::checkSurfaceCollision(PhysicComponent& comp, Vec2 prevToNewWinPos, Vec2& newPos, GameData& data)
 {
     if (prevToNewWinPos.sqrLength() == 0.f)

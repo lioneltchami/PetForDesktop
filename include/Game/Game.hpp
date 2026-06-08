@@ -86,9 +86,13 @@ public:
         datas.monitors.init();
         datas.window->setMonitorCallback(&datas.monitors);
         datas.monitorTopology = std::make_unique<MonitorTopologyCache>(nullptr, 1.0 / 12.0);
-        datas.monitorTopology->attachHotplugBridge(&datas.monitors);
-        datas.monitorTopology->forceRefresh(datas.timeAcc);
         datas.worldSampling = std::make_unique<WorldSamplingSubsystem>(datas.monitorTopology.get(), 1.0 / 12.0);
+        datas.monitorTopology->attachHotplugBridge(&datas.monitors,
+                                                  [sampling = datas.worldSampling.get()]() {
+                                                      if (sampling)
+                                                          sampling->onMonitorTopologyChanged();
+                                                  });
+        datas.monitorTopology->forceRefresh(datas.timeAcc);
         datas.worldSampling->update(datas.timeAcc);
         Vec2i monitorSize    = datas.monitors.getMonitorsSize();
         Vec2i monitorsSizeMM = datas.monitors.getMonitorPhysicalSize();

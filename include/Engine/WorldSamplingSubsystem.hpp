@@ -51,6 +51,7 @@ public:
     void setSurfaceSampleInterval(double intervalSeconds);
 
     bool hasValidSample(const PhysicComponent& comp) const;
+    void onMonitorTopologyChanged();
 
     std::vector<MonitorTopologyItem> getMonitorTopologySnapshot() const;
 
