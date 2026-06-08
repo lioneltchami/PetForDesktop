@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <optional>
 #include <mutex>
 #include <vector>
 
@@ -83,4 +84,8 @@ public:
     void forceRefresh(double nowSeconds);
 
     std::vector<MonitorTopologyItem> getSnapshot() const;
+
+    std::optional<MonitorTopologyItem> findMonitorForLogicalPoint(const Vec2& logicalPoint) const;
+
+    std::optional<MonitorTopologyItem> findMonitorForPhysicalPoint(const Vec2& pixelPoint) const;
 };

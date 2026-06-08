@@ -133,3 +133,33 @@ std::vector<MonitorTopologyItem> MonitorTopologyCache::getSnapshot() const
     std::lock_guard lock{m_mutex};
     return m_monitorsSnapshot;
 }
+
+std::optional<MonitorTopologyItem> MonitorTopologyCache::findMonitorForLogicalPoint(const Vec2& logicalPoint) const
+{
+    std::lock_guard lock{m_mutex};
+    if (m_monitorsSnapshot.empty())
+        return std::nullopt;
+
+    for (const auto& monitor : m_monitorsSnapshot)
+    {
+        if (monitor.containsLogicalPoint(logicalPoint))
+            return monitor;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<MonitorTopologyItem> MonitorTopologyCache::findMonitorForPhysicalPoint(const Vec2& pixelPoint) const
+{
+    std::lock_guard lock{m_mutex};
+    if (m_monitorsSnapshot.empty())
+        return std::nullopt;
+
+    for (const auto& monitor : m_monitorsSnapshot)
+    {
+        if (monitor.containsPhysicalPoint(pixelPoint))
+            return monitor;
+    }
+
+    return std::nullopt;
+}

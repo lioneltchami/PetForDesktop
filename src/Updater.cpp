@@ -4,7 +4,6 @@
 #include "Engine/Log.hpp"
 #include "Game/UpdateMenu.hpp"
 
-#include <array>
 #include <algorithm>
 #include <chrono>
 #include <cctype>
@@ -15,7 +14,6 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
-#include <regex>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -219,6 +217,24 @@ bool isValidSignatureFormat(const std::string& signature)
     return true;
 }
 
+std::string extractFilenameFromUrl(const std::string& url)
+{
+    std::string input = url;
+    const auto queryPos = input.find('?');
+    if (queryPos != std::string::npos)
+        input = input.substr(0, queryPos);
+
+    const auto hashPos = input.find('#');
+    if (hashPos != std::string::npos)
+        input = input.substr(0, hashPos);
+
+    const auto slashPos = input.find_last_of('/');
+    if (slashPos == std::string::npos)
+        return input;
+
+    return input.substr(slashPos + 1);
+}
+
 bool isHttpsUrl(const std::string& value)
 {
     if (value.rfind("https://", 0) != 0)
@@ -295,7 +311,7 @@ bool parseAssetList(const std::string& releaseJson, std::vector<UpdateAssetMetad
         const std::string item = block.substr(objectStart, objectEnd - objectStart + 1);
 
         UpdateAssetMetadata asset;
-        std::string sizeValue;
+        std::uint64_t     sizeBytes = 0;
         if (!parseJsonStringField(item, "name", asset.name))
         {
             cursor = objectEnd + 1;
@@ -314,8 +330,9 @@ bool parseAssetList(const std::string& releaseJson, std::vector<UpdateAssetMetad
             continue;
         }
 
-        parseJsonUnsignedField(item, "size", asset.sizeBytes);
-        asset.size = sizeValue;
+        if (parseJsonUnsignedField(item, "size", sizeBytes))
+            asset.sizeBytes = sizeBytes;
+
         if (asset.sizeBytes > 0)
             asset.size = std::to_string(asset.sizeBytes);
         else
@@ -333,16 +350,16 @@ bool parseManifestFromText(const std::string& manifestText, UpdateMetadata& meta
     bool hasAny = false;
 
     std::string value;
-    if (parseJsonStringField(manifestText, "package", value) || parseJsonStringField(manifestText, "url", value) ||
-        parseJsonStringField(manifestText, "packageUrl", value))
-    {
-        if (isHttpsUrl(value))
+        if (parseJsonStringField(manifestText, "package", value) || parseJsonStringField(manifestText, "url", value) ||
+            parseJsonStringField(manifestText, "packageUrl", value))
         {
-            metadata.packageUrl = value;
-            metadata.packageName = std::filesystem::path(value).filename().string();
-            hasAny = true;
+            if (isHttpsUrl(value))
+            {
+                metadata.packageUrl = value;
+                metadata.packageName = extractFilenameFromUrl(value);
+                hasAny = true;
+            }
         }
-    }
 
     if (parseJsonStringField(manifestText, "checksum", value) || parseJsonStringField(manifestText, "sha256", value))
     {
@@ -400,12 +417,6 @@ bool downloadToString(const std::string& url, std::string& payload, std::string&
     if (response.status_code < 200 || response.status_code >= 300)
     {
         error = "HTTP status " + std::to_string(response.status_code);
-        return false;
-    }
-
-    if (payload.size() > std::numeric_limits<std::size_t>::max())
-    {
-        error = "Update payload response too large";
         return false;
     }
 
@@ -502,6 +513,19 @@ bool validateMetadataEnvelope(const UpdateMetadata& metadata, std::string& error
             return false;
         }
 
+        if (metadata.signatureAlgorithm != "rsa-sha256" && metadata.signatureAlgorithm != "ed25519" &&
+            metadata.signatureAlgorithm != "sha256")
+        {
+            error = "Unsupported signature algorithm";
+            return false;
+        }
+
+        if (metadata.signatureAlgorithm != "sha256" && metadata.signaturePublicKey.empty())
+        {
+            error = "Signed metadata missing signature public key";
+            return false;
+        }
+
         if (!isValidSignatureFormat(metadata.signature))
         {
             error = "Signed metadata uses unsupported signature format";
@@ -517,9 +541,35 @@ bool verifySignedMetadata(const UpdateMetadata& metadata, std::string& error)
     if (metadata.signature.empty())
         return true;
 
-    // Signature verification requires a trust-root and public key in this codebase.
-    (void)metadata;
-    error = "Signed metadata detected but signature verification is unavailable in this build";
+    if (metadata.signatureAlgorithm == "sha256")
+    {
+        if (metadata.signaturePublicKey.empty() && metadata.checksum.empty())
+        {
+            error = "SHA256 metadata signature requires either checksum or public key";
+            return false;
+        }
+
+        if (!metadata.checksum.empty())
+        {
+            std::string signature = metadata.signature;
+            for (auto& c : signature)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+            std::string expected = metadata.checksum;
+            for (auto& c : expected)
+                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+            if (signature != expected)
+            {
+                error = "SHA256 signature does not match checksum metadata";
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    error = "Signature verification requires runtime trust-chain support that is not configured";
     return false;
 }
 
@@ -1006,4 +1056,19 @@ bool Updater::checkForUpdate(GameData& datas)
         });
 
     return true;
+}
+
+bool Updater::parseManifestForTest(const std::string& manifestText, UpdateMetadata& metadata)
+{
+    return parseManifestFromText(manifestText, metadata);
+}
+
+bool Updater::validateMetadataEnvelopeForTest(const UpdateMetadata& metadata, std::string& error)
+{
+    return validateMetadataEnvelope(metadata, error);
+}
+
+bool Updater::verifySignedMetadataForTest(const UpdateMetadata& metadata, std::string& error)
+{
+    return verifySignedMetadata(metadata, error);
 }

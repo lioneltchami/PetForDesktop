@@ -128,7 +128,7 @@ bool WorldSamplingSubsystem::refreshCollisionSample(GameData& data, const Physic
         captureScale = Vec2::one();
 
     Vec2i captureSizePhysical;
-    Vec2  capturePositionPhysical = capturePosLogical * captureScale;
+    Vec2  capturePositionPhysical = logicalToPhysical(capturePosLogical, captureScale);
 
     if (data.debugEdgeDetection)
     {
@@ -281,22 +281,29 @@ bool WorldSamplingSubsystem::testCollisionWithCachedSurface(const SurfaceCollisi
     return false;
 }
 
-Vec2 WorldSamplingSubsystem::getMonitorScaleForPosition(const Vec2& position, const Vec2 defaultScale)
+Vec2 WorldSamplingSubsystem::getMonitorScaleForPosition(const Vec2& position, const Vec2 defaultScale) const
 {
-    std::lock_guard lock{m_mutex};
-    for (const auto& monitor : m_topologyState.monitorSnapshot)
-    {
-        const Vec2 monitorPos{static_cast<float>(monitor.position.x), static_cast<float>(monitor.position.y)};
-        const Vec2 monitorSize{static_cast<float>(monitor.size.x), static_cast<float>(monitor.size.y)};
-        if (position.x >= monitorPos.x && position.x < monitorPos.x + monitorSize.x && position.y >= monitorPos.y &&
-            position.y < monitorPos.y + monitorSize.y)
-        {
-            return monitor.contentScale;
-        }
-    }
+    if (!m_monitorTopology)
+        return defaultScale;
+
+    const auto monitor = m_monitorTopology->findMonitorForLogicalPoint(position);
+    if (monitor.has_value())
+        return monitor->contentScale;
 
     if (!m_topologyState.monitorSnapshot.empty())
         return m_topologyState.monitorSnapshot.front().contentScale;
 
     return defaultScale;
+}
+
+Vec2 WorldSamplingSubsystem::logicalToPhysical(const Vec2& logicalPosition, const Vec2 defaultScale) const
+{
+    if (!m_monitorTopology)
+        return logicalPosition * defaultScale;
+
+    const auto monitor = m_monitorTopology->findMonitorForLogicalPoint(logicalPosition);
+    if (monitor.has_value())
+        return monitor->logicalToPhysical(logicalPosition);
+
+    return logicalPosition * defaultScale;
 }

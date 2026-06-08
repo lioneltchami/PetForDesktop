@@ -38,6 +38,10 @@ struct MonitorTopologyState
 
     bool refreshCollisionSample(GameData& data, const PhysicComponent& comp, Vec2 prevToNewWinPos, double nowSeconds);
 
+    Vec2 getMonitorScaleForPosition(const Vec2& position, const Vec2 defaultScale = Vec2::one()) const;
+
+    Vec2 logicalToPhysical(const Vec2& logicalPosition, const Vec2 defaultScale = Vec2::one()) const;
+
     bool testCollisionWithCachedSurface(const SurfaceCollisionSample& sample, const PhysicComponent& comp,
                                        Vec2 prevToNewWinPos, Vec2& newPos, const GameData& data) const;
 
@@ -53,8 +57,6 @@ public:
 
     bool hasValidSample(const PhysicComponent& comp) const;
     void onMonitorTopologyChanged();
-
-    Vec2 getMonitorScaleForPosition(const Vec2& position, const Vec2 defaultScale = Vec2::one()) const;
 
     std::vector<MonitorTopologyItem> getMonitorTopologySnapshot() const;
 

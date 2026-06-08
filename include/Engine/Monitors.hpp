@@ -8,13 +8,194 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <limits>
+#include <optional>
 
 class Monitors
 {
+public:
+    struct MonitorTransform
+    {
+        Vec2i logicalPosition = Vec2i::zero();
+        Vec2i logicalSize     = Vec2i::zero();
+        Vec2i pixelPosition  = Vec2i::zero();
+        Vec2i pixelSize      = Vec2i::zero();
+        Vec2  contentScale   = Vec2::one();
+
+        Vec2 logicalToPhysical(const Vec2& logicalPoint) const
+        {
+            const float safeScaleX = std::max(contentScale.x, 0.0001f);
+            const float safeScaleY = std::max(contentScale.y, 0.0001f);
+
+            return {(logicalPoint.x - static_cast<float>(logicalPosition.x)) * safeScaleX + static_cast<float>(pixelPosition.x),
+                    (logicalPoint.y - static_cast<float>(logicalPosition.y)) * safeScaleY + static_cast<float>(pixelPosition.y)};
+        }
+
+        Vec2 physicalToLogical(const Vec2& pixelPoint) const
+        {
+            const float safeScaleX = std::max(contentScale.x, 0.0001f);
+            const float safeScaleY = std::max(contentScale.y, 0.0001f);
+
+            return {(pixelPoint.x - static_cast<float>(pixelPosition.x)) / safeScaleX + static_cast<float>(logicalPosition.x),
+                    (pixelPoint.y - static_cast<float>(pixelPosition.y)) / safeScaleY + static_cast<float>(logicalPosition.y)};
+        }
+
+        bool containsLogicalPoint(const Vec2& point) const
+        {
+            return point.x >= static_cast<float>(logicalPosition.x) &&
+                   point.x < static_cast<float>(logicalPosition.x + logicalSize.x) &&
+                   point.y >= static_cast<float>(logicalPosition.y) &&
+                   point.y < static_cast<float>(logicalPosition.y + logicalSize.y);
+        }
+
+        bool containsPhysicalPoint(const Vec2& point) const
+        {
+            return point.x >= static_cast<float>(pixelPosition.x) && point.x < static_cast<float>(pixelPosition.x + pixelSize.x) &&
+                   point.y >= static_cast<float>(pixelPosition.y) && point.y < static_cast<float>(pixelPosition.y + pixelSize.y);
+        }
+    };
+
 protected:
     std::unique_ptr<IWindowEnumerator> m_enumerator;
     std::function<void()>              m_onTopologyChanged;
     mutable std::mutex                 m_mutex;
+
+    bool buildMonitorTransform(int index, MonitorTransform& transform) const
+    {
+        if (!m_enumerator)
+            return false;
+
+        m_enumerator->getMonitorPixelPosition(index, transform.pixelPosition);
+        m_enumerator->getMonitorPixelSize(index, transform.pixelSize);
+        m_enumerator->getMonitorContentScale(index, transform.contentScale);
+        m_enumerator->getMonitorPosition(index, transform.logicalPosition);
+        m_enumerator->getMonitorSize(index, transform.logicalSize);
+
+        if (transform.logicalSize.x <= 0 || transform.logicalSize.y <= 0 || transform.pixelSize.x <= 0 ||
+            transform.pixelSize.y <= 0)
+            return false;
+
+        if (transform.contentScale.x <= 0.f || transform.contentScale.y <= 0.f ||
+            !std::isfinite(transform.contentScale.x) || !std::isfinite(transform.contentScale.y))
+            transform.contentScale = Vec2::one();
+
+        return true;
+    }
+
+    std::optional<MonitorTransform> findMonitorTransformForPoint(const Vec2& point,
+                                                                const bool preferPhysicalContainment = false) const
+    {
+        const int monitorCount = m_enumerator ? m_enumerator->getMonitorsCount() : 0;
+        if (monitorCount <= 0)
+            return std::nullopt;
+
+        MonitorTransform bestTransform;
+        float          bestDistance = FLT_MAX;
+        bool           found       = false;
+
+        for (int i = 0; i < monitorCount; ++i)
+        {
+            MonitorTransform transform;
+            if (!buildMonitorTransform(i, transform))
+                continue;
+
+            if (preferPhysicalContainment ? transform.containsPhysicalPoint(point) : transform.containsLogicalPoint(point))
+                return transform;
+
+            const float clampedX = std::min(std::max(point.x, static_cast<float>(transform.logicalPosition.x)),
+                                            static_cast<float>(transform.logicalPosition.x + transform.logicalSize.x));
+            const float clampedY = std::min(std::max(point.y, static_cast<float>(transform.logicalPosition.y)),
+                                            static_cast<float>(transform.logicalPosition.y + transform.logicalSize.y));
+            const float dx = point.x - clampedX;
+            const float dy = point.y - clampedY;
+            const float distance = dx * dx + dy * dy;
+            if (!found || distance < bestDistance)
+            {
+                found       = true;
+                bestDistance = distance;
+                bestTransform = transform;
+            }
+        }
+
+        if (!found)
+            return std::nullopt;
+
+        return bestTransform;
+    }
+
+    int getPrimaryMonitorIndex() const
+    {
+        std::lock_guard lock{m_mutex};
+        if (!m_enumerator)
+            return -1;
+
+        const int primaryMonitor = m_enumerator->getPrimaryMonitorIndex();
+        if (primaryMonitor >= 0)
+            return primaryMonitor;
+
+        const int monitorCount = m_enumerator->getMonitorsCount();
+        return monitorCount > 0 ? 0 : -1;
+    }
+
+    int findMonitorIndexForLogicalPoint(const Vec2i& logicalPoint) const
+    {
+        std::lock_guard lock{m_mutex};
+        if (!m_enumerator)
+            return -1;
+
+        const Vec2 logicalPointAsFloat{static_cast<float>(logicalPoint.x), static_cast<float>(logicalPoint.y)};
+        const auto monitorTransform = findMonitorTransformForPoint(logicalPointAsFloat, false);
+        if (!monitorTransform)
+            return -1;
+
+        const int monitorCount = m_enumerator->getMonitorsCount();
+        for (int i = 0; i < m_enumerator->getMonitorsCount(); ++i)
+        {
+            MonitorTransform monitorTransformCandidate;
+            if (!buildMonitorTransform(i, monitorTransformCandidate))
+                continue;
+
+            if (monitorTransformCandidate.containsLogicalPoint(logicalPointAsFloat))
+            {
+                return i;
+            }
+        }
+
+        for (int i = 0; i < monitorCount; ++i)
+        {
+            MonitorTransform monitorTransformCandidate;
+            if (!buildMonitorTransform(i, monitorTransformCandidate))
+                continue;
+
+            const float minX = static_cast<float>(monitorTransformCandidate.logicalPosition.x);
+            const float minY = static_cast<float>(monitorTransformCandidate.logicalPosition.y);
+            const float maxX = static_cast<float>(monitorTransformCandidate.logicalPosition.x + monitorTransformCandidate.logicalSize.x);
+            const float maxY = static_cast<float>(monitorTransformCandidate.logicalPosition.y + monitorTransformCandidate.logicalSize.y);
+
+            const float clampedX = std::min(std::max(logicalPointAsFloat.x, minX), maxX);
+            const float clampedY = std::min(std::max(logicalPointAsFloat.y, minY), maxY);
+            const float dx = logicalPointAsFloat.x - clampedX;
+            const float dy = logicalPointAsFloat.y - clampedY;
+            const float distance = dx * dx + dy * dy;
+
+            const auto closest = findMonitorTransformForPoint(logicalPointAsFloat, false);
+            if (closest)
+            {
+                if (monitorTransformCandidate.logicalPosition == closest->logicalPosition &&
+                    monitorTransformCandidate.logicalSize == closest->logicalSize)
+                    return i;
+            }
+
+            (void)distance;
+        }
+
+        return -1;
+    }
+
+    int getMainMonitorIndex() const
+    {
+        return getPrimaryMonitorIndex();
+    }
 
 public:
     Monitors() : m_enumerator(PlatformServices::createWindowEnumerator())
@@ -72,14 +253,61 @@ public:
         m_onTopologyChanged = nullptr;
     }
 
+    int getMainMonitorIndex(Vec2i referencePosition) const
+    {
+        return findMonitorIndexForLogicalPoint(referencePosition);
+    }
+
+    std::optional<MonitorTransform> getMonitorTransformForLogicalPoint(Vec2 logicalPoint) const
+    {
+        std::lock_guard lock{m_mutex};
+        return findMonitorTransformForPoint(logicalPoint, false);
+    }
+
+    std::optional<MonitorTransform> getMonitorTransformForPhysicalPoint(Vec2 pixelPoint) const
+    {
+        std::lock_guard lock{m_mutex};
+        return findMonitorTransformForPoint(pixelPoint, true);
+    }
+
+    Vec2 logicalToPhysical(const Vec2& logicalPoint, const Vec2 fallbackScale = Vec2::one()) const
+    {
+        const auto transform = getMonitorTransformForLogicalPoint(logicalPoint);
+        if (!transform)
+            return logicalPoint * fallbackScale;
+
+        return transform->logicalToPhysical(logicalPoint);
+    }
+
+    Vec2 physicalToLogical(const Vec2& pixelPoint, const Vec2 fallbackScale = Vec2::one()) const
+    {
+        const auto transform = getMonitorTransformForPhysicalPoint(pixelPoint);
+        if (!transform)
+            return pixelPoint * (Vec2{1.f / std::max(fallbackScale.x, 0.0001f), 1.f / std::max(fallbackScale.y, 0.0001f)});
+
+        return transform->physicalToLogical(pixelPoint);
+    }
+
+    Vec2i getMainMonitorPhysicalSize() const
+    {
+        const int mainMonitor = getMainMonitorIndex();
+        if (mainMonitor < 0)
+            return Vec2i::zero();
+
+        return getMonitorPhysicalSize(mainMonitor);
+    }
+
     Vec2i getMainMonitorWorkingArea(Vec2i& position, Vec2i& size) const
     {
         position = Vec2i::zero();
         size     = Vec2i::zero();
-        std::lock_guard lock{m_mutex};
-        if (!m_enumerator)
-            return Vec2i::zero();
-        m_enumerator->getMainMonitorWorkingArea(position, size);
+        const int mainMonitor = getMainMonitorIndex();
+        if (mainMonitor >= 0)
+        {
+            getMonitorPosition(mainMonitor, position);
+            getMonitorSize(mainMonitor, size);
+        }
+
         return position;
     }
 

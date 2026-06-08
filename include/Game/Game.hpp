@@ -119,9 +119,8 @@ public:
         Vec2i monitorPos;
         Vec2i monitorSize;
         Vec2i monitorSizeMM;
-        datas.monitors.getMonitorPosition(0, monitorPos);
-        datas.monitors.getMonitorSize(0, monitorSize);
-        monitorSizeMM = datas.monitors.getMonitorPhysicalSize(0);
+        datas.monitors.getMainMonitorWorkingArea(monitorPos, monitorSize);
+        monitorSizeMM = datas.monitors.getMainMonitorPhysicalSize();
 
         if (monitorSize.sqrLength() == 0)
             monitorSize = datas.monitors.getMonitorsSize();

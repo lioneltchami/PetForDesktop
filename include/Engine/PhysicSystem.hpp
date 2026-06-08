@@ -8,6 +8,7 @@
 #include "Engine/Rect.hpp"
 #include "Game/GameData.hpp"
 
+#include <cfloat>
 #include <cmath>
 
 class PhysicSystem
@@ -34,13 +35,18 @@ public:
     static bool isRectDisjointRectB(const Vec2 posA, const Vec2 sizeA, const Vec2 posB, const Vec2 sizeB)
     {
         // Check if the rectangles are disjoint (i.e. do not overlap)
-        return posA.x + sizeA.x < posB.x || posA.x > posB.x + sizeB.x || posA.y + sizeA.y < posB.y ||
-               posA.y > posB.y + sizeB.y;
+        constexpr float kEpsilon = 0.0001f;
+
+        return posA.x + sizeA.x <= posB.x + kEpsilon || posA.x >= posB.x + sizeB.x - kEpsilon ||
+               posA.y + sizeA.y <= posB.y + kEpsilon || posA.y >= posB.y + sizeB.y - kEpsilon;
     }
 
     static bool isRectAInsideRectB(const Vec2 posA, const Vec2 sizeA, const Vec2 posB, const Vec2 sizeB)
     {
-        return posA.x > posB.x && posA.x + sizeA.x < posB.x + sizeB.x && posA.y > posB.y && posA.y + sizeA.y < posB.y + sizeB.y;
+        constexpr float kEpsilon = 0.0001f;
+
+        return posA.x >= posB.x - kEpsilon && posA.x + sizeA.x <= posB.x + sizeB.x + kEpsilon &&
+               posA.y >= posB.y - kEpsilon && posA.y + sizeA.y <= posB.y + sizeB.y + kEpsilon;
     }
 
     void computeMonitorCollisions(PhysicComponent& comp)
@@ -53,70 +59,80 @@ public:
         int                screenOverlapCount = 0;
 
         // 1: Check if pet is outside of all monitors
-            for (const auto& monitorItem : monitorsTopology)
-            {
-                bool isOutsideOfCurrentMonitor =
-                    isRectDisjointRectB(comp.getRect().getPosition(), comp.getRect().getSize(), monitorItem.position, monitorItem.size);
-            bool iInsideOfCurrentMonitor =
-                isRectAInsideRectB(comp.getRect().getPosition(), comp.getRect().getSize(), monitorItem.position, monitorItem.size);
+        for (const auto& monitorItem : monitorsTopology)
+        {
+            const Vec2 monitorPos{static_cast<float>(monitorItem.position.x), static_cast<float>(monitorItem.position.y)};
+            const Vec2 monitorSize{static_cast<float>(monitorItem.size.x), static_cast<float>(monitorItem.size.y)};
 
-            screenOverlapCount += !iInsideOfCurrentMonitor && !isOutsideOfCurrentMonitor;
+            const bool isOutsideOfCurrentMonitor =
+                isRectDisjointRectB(comp.getRect().getPosition(), comp.getRect().getSize(), monitorPos, monitorSize);
+            const bool isInsideOfCurrentMonitor =
+                isRectAInsideRectB(comp.getRect().getPosition(), comp.getRect().getSize(), monitorPos, monitorSize);
 
+            screenOverlapCount += !isInsideOfCurrentMonitor && !isOutsideOfCurrentMonitor;
             isOutside &= isOutsideOfCurrentMonitor;
         }
 
         // 2: If pet is outside need correction
-        float minSqrDistance    = FLT_MAX;
+        Vec2       reelPositionCorrection = comp.getRect().getPosition();
         comp.isOnBottomOfWindow = false;
-        Vec2 reelPositionCorrection;
 
         // Check if only one screen overlap is not perfect but cover the majority of cases
-        comp.touchScreenEdge = isOutside || screenOverlapCount == 1;
+        comp.touchScreenEdge = isOutside || screenOverlapCount <= 1;
         if (comp.touchScreenEdge)
         {
-        for (const auto& monitorItem : monitorsTopology)
-        {
-            Vec2 positionCorrection = comp.getRect().getPosition();
-            bool isOnBottom         = false;
+            float bestDistance = FLT_MAX;
+            bool bestOnBottom = false;
 
-            if (comp.getRect().getCornerMin().x <= monitorItem.position.x)
+            for (const auto& monitorItem : monitorsTopology)
             {
-                positionCorrection.x = monitorItem.position.x;
-            }
-            else if (comp.getRect().getCornerMax().x >= monitorItem.position.x + monitorItem.size.x)
-            {
-                positionCorrection.x = monitorItem.position.x + monitorItem.size.x - comp.getRect().getSize().x;
-            }
+                const Vec2 monitorPos{static_cast<float>(monitorItem.position.x), static_cast<float>(monitorItem.position.y)};
+                const Vec2 monitorSize{static_cast<float>(monitorItem.size.x), static_cast<float>(monitorItem.size.y)};
 
-            if (comp.getRect().getCornerMin().y <= monitorItem.position.y)
-            {
-                positionCorrection.y = monitorItem.position.y;
-            }
-            else if (comp.getRect().getCornerMax().y >= monitorItem.position.y + monitorItem.size.y)
-            {
-                positionCorrection.y = monitorItem.position.y + monitorItem.size.y - comp.getRect().getSize().y;
-                isOnBottom           = true;
-            }
+                Vec2 positionCorrection = comp.getRect().getPosition();
+                bool isOnBottom         = false;
 
-                float currentSqrDistance = (positionCorrection - comp.getRect().getPosition()).sqrLength();
-                if (currentSqrDistance < minSqrDistance)
+                if (comp.getRect().getCornerMin().x <= monitorPos.x)
                 {
-                    comp.isOnBottomOfWindow = isOnBottom;
-                    minSqrDistance          = currentSqrDistance;
-                    reelPositionCorrection  = positionCorrection;
+                    positionCorrection.x = monitorPos.x;
+                }
+                else if (comp.getRect().getCornerMax().x >= monitorPos.x + monitorSize.x)
+                {
+                    positionCorrection.x = monitorPos.x + monitorSize.x - comp.getRect().getSize().x;
+                }
+
+                if (comp.getRect().getCornerMin().y <= monitorPos.y)
+                {
+                    positionCorrection.y = monitorPos.y;
+                }
+                else if (comp.getRect().getCornerMax().y >= monitorPos.y + monitorSize.y)
+                {
+                    positionCorrection.y = monitorPos.y + monitorSize.y - comp.getRect().getSize().y;
+                    isOnBottom           = true;
+                }
+
+                const float currentSqrDistance = (positionCorrection - comp.getRect().getPosition()).sqrLength();
+                if (currentSqrDistance < bestDistance)
+                {
+                    bestDistance     = currentSqrDistance;
+                    reelPositionCorrection = positionCorrection;
+                    bestOnBottom     = isOnBottom;
                 }
             }
 
-            if (minSqrDistance > FLT_EPSILON)
+            if (bestDistance < FLT_MAX)
+            {
+                comp.isOnBottomOfWindow = bestOnBottom;
                 comp.velocity =
                     comp.velocity.reflect((reelPositionCorrection - comp.getRect().getPosition()).normalized()) * data.bounciness;
 
-            comp.isGrounded = (comp.isOnBottomOfWindow &&
-                               comp.velocity.sqrLength() < data.isGroundedDetection * data.isGroundedDetection) ||
-                              checkIsGrounded(comp);
-            comp.velocity *= !comp.isGrounded; // reset velocity if is grounded
+                comp.isGrounded = (comp.isOnBottomOfWindow &&
+                                   comp.velocity.sqrLength() < data.isGroundedDetection * data.isGroundedDetection) ||
+                                  checkIsGrounded(comp);
+                comp.velocity *= !comp.isGrounded; // reset velocity if is grounded
 
-            comp.getRect().setPosition(reelPositionCorrection);
+                comp.getRect().setPosition(reelPositionCorrection);
+            }
         }
     }
 

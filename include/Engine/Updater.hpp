@@ -25,4 +25,10 @@ public:
                                 std::string& error) const;
 
     bool applyPackage(const std::filesystem::path& stagedFile, const UpdateMetadata& metadata, std::string& error) const;
+
+    static bool parseManifestForTest(const std::string& manifestText, UpdateMetadata& metadata);
+
+    static bool validateMetadataEnvelopeForTest(const UpdateMetadata& metadata, std::string& error);
+
+    static bool verifySignedMetadataForTest(const UpdateMetadata& metadata, std::string& error);
 };
