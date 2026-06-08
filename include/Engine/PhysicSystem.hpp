@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/ScreenShoot.hpp"
+#include "Engine/MonitorTopologyCache.hpp"
 
 #ifdef USE_OPENGL_API
 #include "Engine/Graphics/TextureOGL.hpp"
@@ -52,22 +53,19 @@ public:
 
     void computeMonitorCollisions(PhysicComponent& comp)
     {
-        std::vector<Vec2i> monitorsPosition;
-        std::vector<Vec2i> monitorSize;
+        const std::vector<MonitorTopologyItem> monitorsTopology = data.monitorTopology ? data.monitorTopology->getSnapshot() : std::vector<MonitorTopologyItem>{};
+        if (monitorsTopology.empty())
+            return;
         bool               isOutside          = true;
         int                screenOverlapCount = 0;
 
         // 1: Check if pet is outside of all monitors
-        for (int i = 0; i < data.monitors.getMonitorsCount(); ++i)
+        for (const auto& monitorItem : monitorsTopology)
         {
-            monitorsPosition.emplace_back();
-            monitorSize.emplace_back();
-            data.monitors.getMonitorPosition(i, monitorsPosition[i]);
-            data.monitors.getMonitorSize(i, monitorSize[i]);
             bool isOutsideOfCurrentMonitor =
-                isRectDisjointRectB(comp.getRect().getPosition(), comp.getRect().getSize(), monitorsPosition[i], monitorSize[i]);
+                isRectDisjointRectB(comp.getRect().getPosition(), comp.getRect().getSize(), monitorItem.position, monitorItem.size);
             bool iInsideOfCurrentMonitor =
-                isRectAInsideRectB(comp.getRect().getPosition(), comp.getRect().getSize(), monitorsPosition[i], monitorSize[i]);
+                isRectAInsideRectB(comp.getRect().getPosition(), comp.getRect().getSize(), monitorItem.position, monitorItem.size);
 
             screenOverlapCount += !iInsideOfCurrentMonitor && !isOutsideOfCurrentMonitor;
 
@@ -83,29 +81,29 @@ public:
         comp.touchScreenEdge = isOutside || screenOverlapCount == 1;
         if (comp.touchScreenEdge)
         {
-            for (int i = 0; i < data.monitors.getMonitorsCount(); ++i)
+        for (const auto& monitorItem : monitorsTopology)
+        {
+            Vec2 positionCorrection = comp.getRect().getPosition();
+            bool isOnBottom         = false;
+
+            if (comp.getRect().getCornerMin().x <= monitorItem.position.x)
             {
-                Vec2 positionCorrection = comp.getRect().getPosition();
-                bool isOnBottom         = false;
+                positionCorrection.x = monitorItem.position.x;
+            }
+            else if (comp.getRect().getCornerMax().x >= monitorItem.position.x + monitorItem.size.x)
+            {
+                positionCorrection.x = monitorItem.position.x + monitorItem.size.x - comp.getRect().getSize().x;
+            }
 
-                if (comp.getRect().getCornerMin().x <= monitorsPosition[i].x)
-                {
-                    positionCorrection.x = monitorsPosition[i].x;
-                }
-                else if (comp.getRect().getCornerMax().x >= monitorsPosition[i].x + monitorSize[i].x)
-                {
-                    positionCorrection.x = monitorsPosition[i].x + monitorSize[i].x - comp.getRect().getSize().x;
-                }
-
-                if (comp.getRect().getCornerMin().y <= monitorsPosition[i].y)
-                {
-                    positionCorrection.y = monitorsPosition[i].y;
-                }
-                else if (comp.getRect().getCornerMax().y >= monitorsPosition[i].y + monitorSize[i].y)
-                {
-                    positionCorrection.y = monitorsPosition[i].y + monitorSize[i].y - comp.getRect().getSize().y;
-                    isOnBottom           = true;
-                }
+            if (comp.getRect().getCornerMin().y <= monitorItem.position.y)
+            {
+                positionCorrection.y = monitorItem.position.y;
+            }
+            else if (comp.getRect().getCornerMax().y >= monitorItem.position.y + monitorItem.size.y)
+            {
+                positionCorrection.y = monitorItem.position.y + monitorItem.size.y - comp.getRect().getSize().y;
+                isOnBottom           = true;
+            }
 
                 float currentSqrDistance = (positionCorrection - comp.getRect().getPosition()).sqrLength();
                 if (currentSqrDistance < minSqrDistance)

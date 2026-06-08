@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine/Monitors.hpp"
+#include "Engine/MonitorTopologyCache.hpp"
 #include "Engine/Vector2.hpp"
 
 #include <filesystem>
@@ -13,6 +14,7 @@ struct GameData
 {
     std::unique_ptr<class Window>            window;
     Monitors                                 monitors;
+    std::unique_ptr<MonitorTopologyCache>    monitorTopology;
     std::unique_ptr<class InteractionSystem> interactionSystem;
 
     // Represente the window with all sub windows

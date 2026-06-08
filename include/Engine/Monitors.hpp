@@ -4,12 +4,16 @@
 #include "Engine/Platform/PlatformServices.hpp"
 #include "Engine/Vector2.hpp"
 
+#include <functional>
 #include <memory>
+#include <mutex>
 
 class Monitors
 {
 protected:
     std::unique_ptr<IWindowEnumerator> m_enumerator;
+    std::function<void()>              m_onTopologyChanged;
+    mutable std::mutex                 m_mutex;
 
 public:
     Monitors() : m_enumerator(PlatformServices::createWindowEnumerator())
@@ -20,13 +24,21 @@ public:
     {
     }
 
+    void setTopologyChangedCallback(std::function<void()> callback)
+    {
+        std::lock_guard lock{m_mutex};
+        m_onTopologyChanged = std::move(callback);
+    }
+
     void setImplementation(std::unique_ptr<IWindowEnumerator> enumerator)
     {
+        std::lock_guard lock{m_mutex};
         m_enumerator = std::move(enumerator);
     }
 
     void init()
     {
+        std::lock_guard lock{m_mutex};
         if (!m_enumerator)
             m_enumerator = PlatformServices::createWindowEnumerator();
         if (m_enumerator)
@@ -35,20 +47,35 @@ public:
 
     void onMonitorConnectionChanged(void* monitor, int event)
     {
-        if (!m_enumerator)
+        std::function<void()> callback;
         {
-            m_enumerator = PlatformServices::createWindowEnumerator();
-            return;
+            std::lock_guard lock{m_mutex};
+            if (!m_enumerator)
+            {
+                m_enumerator = PlatformServices::createWindowEnumerator();
+                if (!m_enumerator)
+                    return;
+            }
+
+            m_enumerator->onMonitorConnectionChanged(monitor, event);
+            callback = m_onTopologyChanged;
         }
-        if (!m_enumerator)
-            return;
-        m_enumerator->onMonitorConnectionChanged(monitor, event);
+
+        if (callback)
+            callback();
     }
 
-    void getMainMonitorWorkingArea(Vec2i& position, Vec2i& size) const
+    void clearTopologyChangedCallback() noexcept
+    {
+        std::lock_guard lock{m_mutex};
+        m_onTopologyChanged = nullptr;
+    }
+
+    Vec2i getMainMonitorWorkingArea(Vec2i& position, Vec2i& size) const
     {
         position = Vec2i::zero();
         size     = Vec2i::zero();
+        std::lock_guard lock{m_mutex};
         if (!m_enumerator)
             return;
         m_enumerator->getMainMonitorWorkingArea(position, size);
@@ -56,6 +83,7 @@ public:
 
     Vec2i getMonitorsSize() const
     {
+        std::lock_guard lock{m_mutex};
         if (!m_enumerator)
             return Vec2i::zero();
         return m_enumerator->getMonitorsSize();
@@ -63,6 +91,7 @@ public:
 
     void getMonitorPosition(int index, Vec2i& position) const
     {
+        std::lock_guard lock{m_mutex};
         if (!m_enumerator)
             return;
         m_enumerator->getMonitorPosition(index, position);
@@ -70,6 +99,7 @@ public:
 
     void getMonitorSize(int index, Vec2i& size) const
     {
+        std::lock_guard lock{m_mutex};
         if (!m_enumerator)
             return;
         m_enumerator->getMonitorSize(index, size);
@@ -77,6 +107,7 @@ public:
 
     Vec2i getMonitorPhysicalSize() const
     {
+        std::lock_guard lock{m_mutex};
         if (!m_enumerator)
             return Vec2i::zero();
         return m_enumerator->getMonitorPhysicalSize();
@@ -84,6 +115,7 @@ public:
 
     int getMonitorsCount() const
     {
+        std::lock_guard lock{m_mutex};
         if (!m_enumerator)
             return 0;
         return m_enumerator->getMonitorsCount();

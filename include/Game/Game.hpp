@@ -80,6 +80,9 @@ public:
         datas.window->init(datas);
         datas.monitors.init();
         datas.window->setMonitorCallback(&datas.monitors);
+        datas.monitorTopology = std::make_unique<MonitorTopologyCache>(&datas.monitors, 1.0 / 12.0);
+        datas.monitors.setTopologyChangedCallback([&]() { datas.monitorTopology->markDirty(); });
+        datas.monitorTopology->forceRefresh(datas.timeAcc);
         Vec2i monitorSize    = datas.monitors.getMonitorsSize();
         Vec2i monitorsSizeMM = datas.monitors.getMonitorPhysicalSize();
 
@@ -194,6 +197,8 @@ public:
         datas.window->setSize(monitorSize);
         datas.window->setPosition(Vec2::zero());
         TimeManager::instance().setFrameRate(1);
+        TimeManager::instance().emplaceTimer(
+            [&]() { datas.monitorTopology->refreshIfNeeded(datas.timeAcc); }, 1.0 / 12.0, true);
 
         TimeManager::instance().start();
         while (!datas.window->shouldClose())
@@ -315,6 +320,8 @@ public:
                 }
             },
             1.f / datas.physicFrameRate, true);
+        TimeManager::instance().emplaceTimer(
+            [&]() { datas.monitorTopology->refreshIfNeeded(datas.timeAcc); }, 1.0 / 12.0, true);
 
         TimeManager::instance().start();
         while (!datas.window->shouldClose())
