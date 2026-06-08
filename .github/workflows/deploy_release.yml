@@ -1,0 +1,219 @@
+name: Deploy Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+env:
+  PROJECT_NAME: ${{github.event.repository.name}}
+  BINARY_FOLDER: ProjectBinaries
+  WIN64_FOLDER: Windows
+  LINUX_FOLDER: Linux
+  MACOS_FOLDER: MaxOs
+  VERSION: ${GITHUB_REF/refs\/tags\//}
+
+jobs:
+  windows_msvc:
+    name: Windows | MSVC
+    runs-on: windows-2019
+
+    strategy:
+      fail-fast: false
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+
+      - name: Generate Project
+        run: cmake --preset=x64-Release_ogl
+
+      - name: Build Project
+        run: cmake --build out/x64-Release_ogl --config Release --verbose
+
+      - name: Run Tests
+        run: cd out/x64-Release_ogl && ctest -C Release -V
+
+      - name: Setup Binaries Artifact
+        run: |
+          mkdir ${{env.BINARY_FOLDER}}
+          mkdir ${{env.BINARY_FOLDER}}/${{env.WIN64_FOLDER}}
+          mkdir ${{env.BINARY_FOLDER}}/${{env.WIN64_FOLDER}}/${{env.PROJECT_NAME}}
+
+          mv out/x64-Release_ogl/Release/${{env.PROJECT_NAME}}.exe ${{env.BINARY_FOLDER}}/${{env.WIN64_FOLDER}}/${{env.PROJECT_NAME}}
+          mv content ${{env.BINARY_FOLDER}}/${{env.WIN64_FOLDER}}/${{env.PROJECT_NAME}}
+
+          mv README.md ${{env.BINARY_FOLDER}}/${{env.WIN64_FOLDER}}/${{env.PROJECT_NAME}}/
+
+      - name: Upload Binaries Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{env.BINARY_FOLDER}}
+          path: ./${{env.BINARY_FOLDER}}
+          retention-days: 7
+
+  linux_gcc_clang:
+    name: Linux | Clang
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [clang++-11]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+
+      - name: Install suitable compiler
+        run: sudo apt-get install ${{ matrix.compiler }}
+
+      - name: Install ninja
+        uses: seanmiddleditch/gha-setup-ninja@master
+
+      - name: Install CMake
+        uses: jwlawson/actions-setup-cmake@v1.8
+        with:
+          cmake-version: '3.15.0'
+
+      - name: Substitute Compiler Name
+        uses: bluwy/substitute-string-action@v1
+        id: replace_compiler
+        with:
+          _input-text: ${{ matrix.compiler }}
+          clang++: 'clang'
+          g++: 'gcc'
+
+      - name: Setup Compiler
+        run: |
+          echo "CC=${{ steps.replace_compiler.outputs.result }}" >> $GITHUB_ENV
+          echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV
+
+      - name: Generate Project
+        run: cmake -B Build/Release -DCMAKE_BUILD_TYPE=Release -G "Ninja"
+
+      - name: Build Project
+        run: cmake --build Build/Release --config Release --verbose
+
+      - name: Run Tests
+        run: |
+          cd Build/Release && ctest -C Release -V
+  
+      - name: Setup Binaries Artifact
+        run: |
+          mkdir ${{env.BINARY_FOLDER}}
+          mkdir ${{env.BINARY_FOLDER}}/${{env.LINUX_FOLDER}}
+          mkdir ${{env.BINARY_FOLDER}}/${{env.LINUX_FOLDER}}/${{env.PROJECT_NAME}}
+
+          mv Build/Release/Release/$PROJECT_NAME ${{env.BINARY_FOLDER}}/${{env.LINUX_FOLDER}}/${{env.PROJECT_NAME}}
+          mv content ${{env.BINARY_FOLDER}}/${{env.LINUX_FOLDER}}/${{env.PROJECT_NAME}}
+
+          mv README.md ${{env.BINARY_FOLDER}}/${{env.LINUX_FOLDER}}/${{env.PROJECT_NAME}}/
+
+      - name: Upload Binaries Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{env.BINARY_FOLDER}}
+          path: ./${{env.BINARY_FOLDER}}
+          retention-days: 7
+
+  macos:
+    name: MacOS | Clang
+    runs-on: macos-latest
+
+    strategy:
+      fail-fast: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+          submodules: 'recursive'
+
+      - name: Install ninja
+        uses: seanmiddleditch/gha-setup-ninja@master
+
+      - name: Install CMake
+        uses: jwlawson/actions-setup-cmake@v1.8
+        with:
+          cmake-version: '3.15.0'
+
+      - name: Generate Project
+        run: cmake -B Build/Release -DCMAKE_BUILD_TYPE=Release -G "Ninja"
+
+      - name: Build Project
+        run: cmake --build Build/Release --config Release --verbose
+
+      - name: Setup Binaries Artifact
+        run: |
+          mkdir ${{env.BINARY_FOLDER}}
+          mkdir ${{env.BINARY_FOLDER}}/${{env.MACOS_FOLDER}}
+          mkdir ${{env.BINARY_FOLDER}}/${{env.MACOS_FOLDER}}/${{env.PROJECT_NAME}}
+
+          mv Build/Release/Release/$PROJECT_NAME ${{env.BINARY_FOLDER}}/${{env.MACOS_FOLDER}}/${{env.PROJECT_NAME}}
+          mv content ${{env.BINARY_FOLDER}}/${{env.MACOS_FOLDER}}/${{env.PROJECT_NAME}}
+
+          mv README.md ${{env.BINARY_FOLDER}}/${{env.MACOS_FOLDER}}/${{env.PROJECT_NAME}}/
+
+      - name: Upload Binaries Artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: ${{env.BINARY_FOLDER}}
+          path: ./${{env.BINARY_FOLDER}}
+          retention-days: 7
+
+  deploy_release_binaries:
+    name: Deploy Binaries
+    runs-on: ubuntu-latest
+    needs: [windows_msvc, linux_gcc_clang, macos]
+    if: ${{ always() && contains(needs.*.result, 'success') }}
+    steps:
+      - name: Install zip
+        run: sudo apt-get install zip
+        
+      - name: Fetch Binaries Artifacts
+        uses: actions/download-artifact@v2
+        with:
+          name: ${{env.BINARY_FOLDER}}
+          path: ./${{env.BINARY_FOLDER}}
+
+      - name: Linux environment variable
+        if: needs.linux_gcc_clang.result == 'success'
+        run: echo "LINUX_ARCHIVE_PATH=$PROJECT_NAME_$VERSION_linux.tar.gz" >> $GITHUB_ENV
+
+      - name: Build Linux Binaries Archive
+        if: needs.linux_gcc_clang.result == 'success'
+        run: |
+          tar -czvf ${{env.LINUX_ARCHIVE_PATH}} --directory ${{env.BINARY_FOLDER}}/${{env.LINUX_FOLDER}}/${{env.PROJECT_NAME}} .
+
+      - name: Windows environment variable
+        if: needs.windows_msvc.result == 'success'
+        run: echo "WIN_ARCHIVE_PATH=${{env.PROJECT_NAME}}_${{env.VERSION}}_windows_x64.zip" >> $GITHUB_ENV
+
+      - name: Build Windows Binaries Archive
+        if: needs.windows_msvc.result == 'success'
+        run: |
+          (cd ${{env.BINARY_FOLDER}}/${{env.WIN64_FOLDER}}/${{env.PROJECT_NAME}} && zip -r - .) > ${{env.WIN_ARCHIVE_PATH}}
+
+      - name: MacOS environment variable
+        if: needs.macos.result == 'success'
+        run: echo "MAC_ARCHIVE_PATH=$PROJECT_NAME_$VERSION_macos.tar.gz" >> $GITHUB_ENV
+
+      - name: Build MacOS Binaries Archive
+        if: needs.macos.result == 'success'
+        run: |
+          tar -czvf ${{env.MAC_ARCHIVE_PATH}} --directory ${{env.BINARY_FOLDER}}/${{env.MACOS_FOLDER}}/${{env.PROJECT_NAME}} .
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v1
+        with:
+          generate_release_notes: true
+          files: |
+            ${{env.LINUX_ARCHIVE_PATH}}
+            ${{env.WIN_ARCHIVE_PATH}}
+            ${{env.MAC_ARCHIVE_PATH}}

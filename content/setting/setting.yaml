@@ -1,0 +1,30 @@
+- Game:
+    FPS: 60
+    RandomSeed: -1
+- Physic:
+    PhysicFrameRate: 60
+    Bounciness: 0.6
+    GravityX: 0
+    GravityY: 9.81
+    Friction: 0.85
+    ContinuousCollisionMaxVelocity: 40
+    FootBasementWidth: 6
+    FootBasementHeight: 2
+    CollisionPixelRatioStopMovement: 0.3
+    IsGroundedDetection: 1
+    InputReleaseImpulse: 1
+- GamePlay:
+    CoyoteTimeCursorMovement: 0.05
+- Window:
+    FullScreenWindow: true
+    ShowWindow: false
+    ShowFrameBufferBackground: false
+    UseForwardWindow: true
+    UseMousePassThoughWindow: true
+- Style:
+    Theme: PetForDesktop
+- Accessibility:
+    Scale: 2
+    TextScale: 1
+- Debug:
+    ShowEdgeDetection: false
