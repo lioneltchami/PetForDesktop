@@ -4,6 +4,18 @@
 #include "yaml-cpp/yaml.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <errno.h>
+
+#ifndef _WIN32
+inline int fopen_s(FILE** file, const char* filename, const char* mode)
+{
+    *file = fopen(filename, mode);
+    if (!*file)
+        return errno;
+    return 0;
+}
+#endif
 
 void Setting::importFile(const char* src, GameData& data)
 {

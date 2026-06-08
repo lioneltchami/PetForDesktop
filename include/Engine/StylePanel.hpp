@@ -4,7 +4,29 @@
 #include "backends/imgui_impl_opengl3.h"
 #include <imgui.h>
 #include <math.h> // sqrtf
+#include <errno.h>
+#include <stdio.h> // fopen, fprintf, fscanf
+#include <cstdarg>
 #include <vector>
+
+#ifndef _WIN32
+inline int fopen_s(FILE** file, const char* filename, const char* mode)
+{
+    *file = fopen(filename, mode);
+    if (!*file)
+        return errno;
+    return 0;
+}
+
+inline int sscanf_s(const char* str, const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    const int result = vsscanf(str, format, args);
+    va_end(args);
+    return result;
+}
+#endif
 
 #ifdef _WIN32
 #define IM_NEWLINE "\r\n"
@@ -13,8 +35,10 @@
 #endif
 
 // From <imgui.cpp>:--------------------------------------------------------
-#include <stdio.h> // vsnprintf
-#define IM_ARRAYSIZE(_ARR) ((int)(sizeof(_ARR) / sizeof(*_ARR)))
+#if defined(IM_ARRAYSIZE)
+#undef IM_ARRAYSIZE
+#endif
+#define IM_ARRAYSIZE(_ARR) ((int)IM_COUNTOF(_ARR))
 #include <string.h>
 
 #define PATH_UI_STYLE RESOURCE_PATH "/styles/UIStyle.style"
@@ -59,7 +83,7 @@ inline void ImGuiSaveStyle(const char* filename, const ImGuiStyle& style, const 
     if (strcmp(currentFont, "default") == 0)
         fprintf(f, "[Font]\n%s\n", currentFont);
     else
-        fprintf(f, "[Font]\n%s %f\n", currentFont, ImGui::GetFont()->ConfigData->SizePixels);
+        fprintf(f, "[Font]\n%s %f\n", currentFont, ImGui::GetStyle().FontSizeBase);
 
     for (ImGuiCol i = 0; i != ImGuiCol_COUNT; i++)
     {
@@ -312,7 +336,8 @@ inline void ImGuiLoadStyle(const char* filename, ImGuiStyle& style)
                     {
                         if (ImGui::GetIO().Fonts->AddFontFromFileTTF(str, v > 0 ? v : 14))
                         {
-                            ImGui_ImplOpenGL3_CreateFontsTexture();
+                            ImGui_ImplOpenGL3_DestroyDeviceObjects();
+                            ImGui_ImplOpenGL3_CreateDeviceObjects();
                         }
                     }
                 }
@@ -399,9 +424,9 @@ static void setDefaultTheme()
     colors[ImGuiCol_ResizeGripActive]      = ImVec4(0.13f, 0.75f, 1.00f, 0.80f);
     colors[ImGuiCol_Tab]                   = ImVec4(0.13f, 0.75f, 0.55f, 0.80f);
     colors[ImGuiCol_TabHovered]            = ImVec4(0.13f, 0.75f, 0.75f, 0.80f);
-    colors[ImGuiCol_TabActive]             = ImVec4(0.13f, 0.75f, 1.00f, 0.80f);
-    colors[ImGuiCol_TabUnfocused]          = ImVec4(0.18f, 0.18f, 0.18f, 1.00f);
-    colors[ImGuiCol_TabUnfocusedActive]    = ImVec4(0.36f, 0.36f, 0.36f, 0.54f);
+    colors[ImGuiCol_TabSelected]           = ImVec4(0.13f, 0.75f, 1.00f, 0.80f);
+    colors[ImGuiCol_TabDimmed]             = ImVec4(0.18f, 0.18f, 0.18f, 1.00f);
+    colors[ImGuiCol_TabDimmedSelected]     = ImVec4(0.36f, 0.36f, 0.36f, 0.54f);
     colors[ImGuiCol_PlotLines]             = ImVec4(0.61f, 0.61f, 0.61f, 1.00f);
     colors[ImGuiCol_PlotLinesHovered]      = ImVec4(1.00f, 0.43f, 0.35f, 1.00f);
     colors[ImGuiCol_PlotHistogram]         = ImVec4(0.90f, 0.70f, 0.00f, 1.00f);
@@ -413,7 +438,7 @@ static void setDefaultTheme()
     colors[ImGuiCol_TableRowBgAlt]         = ImVec4(1.00f, 1.00f, 1.00f, 0.07f);
     colors[ImGuiCol_TextSelectedBg]        = ImVec4(0.26f, 0.59f, 0.98f, 0.35f);
     colors[ImGuiCol_DragDropTarget]        = ImVec4(1.00f, 1.00f, 0.00f, 0.90f);
-    colors[ImGuiCol_NavHighlight]          = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
+    colors[ImGuiCol_NavCursor]             = ImVec4(0.26f, 0.59f, 0.98f, 1.00f);
     colors[ImGuiCol_NavWindowingHighlight] = ImVec4(1.00f, 1.00f, 1.00f, 0.70f);
     colors[ImGuiCol_NavWindowingDimBg]     = ImVec4(0.80f, 0.80f, 0.80f, 0.20f);
     colors[ImGuiCol_ModalWindowDimBg]      = ImVec4(0.80f, 0.80f, 0.80f, 0.35f);
@@ -506,7 +531,7 @@ inline void ShowStyleEditor(ImGuiStyle* ref = nullptr)
             ImGui::SliderFloat2("WindowTitleAlign", (float*)&style.WindowTitleAlign, 0.0f, 1.0f, "%.2f");
             int window_menu_button_position = style.WindowMenuButtonPosition + 1;
             if (ImGui::Combo("WindowMenuButtonPosition", (int*)&window_menu_button_position, "None\0Left\0Right\0"))
-                style.WindowMenuButtonPosition = window_menu_button_position - 1;
+                style.WindowMenuButtonPosition = static_cast<ImGuiDir>(window_menu_button_position - 1);
             ImGui::Combo("ColorButtonPosition", (int*)&style.ColorButtonPosition, "Left\0Right\0");
             ImGui::SliderFloat2("ButtonTextAlign", (float*)&style.ButtonTextAlign, 0.0f, 1.0f, "%.2f");
             ImGui::SameLine();
@@ -533,9 +558,9 @@ inline void ShowStyleEditor(ImGuiStyle* ref = nullptr)
                 alpha_flags = ImGuiColorEditFlags_None;
             }
             ImGui::SameLine();
-            if (ImGui::RadioButton("Alpha", alpha_flags == ImGuiColorEditFlags_AlphaPreview))
+            if (ImGui::RadioButton("Alpha", alpha_flags == ImGuiColorEditFlags_AlphaPreviewHalf))
             {
-                alpha_flags = ImGuiColorEditFlags_AlphaPreview;
+                alpha_flags = ImGuiColorEditFlags_AlphaPreviewHalf;
             }
             ImGui::SameLine();
             if (ImGui::RadioButton("Both", alpha_flags == ImGuiColorEditFlags_AlphaPreviewHalf))
@@ -549,7 +574,7 @@ inline void ShowStyleEditor(ImGuiStyle* ref = nullptr)
 
             ImGui::BeginChild("##colors", ImVec2(0, 0), true,
                               ImGuiWindowFlags_AlwaysVerticalScrollbar | ImGuiWindowFlags_AlwaysHorizontalScrollbar |
-                                  ImGuiWindowFlags_NavFlattened);
+                                  ImGuiChildFlags_NavFlattened);
             ImGui::PushItemWidth(-160);
             for (int i = 0; i < ImGuiCol_COUNT; i++)
             {

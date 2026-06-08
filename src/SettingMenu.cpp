@@ -69,7 +69,7 @@ void SettingMenu::update(double deltaTime)
             ImGui::DragInt("Global scale", &datas.scale, 0.05f, 1, 10);
             if (ImGui::DragFloat("Font scale", &datas.textScale, 0.005f, 0.3f, 2.0f, "%.1f"))
             {
-                ImGui::GetFont()->Scale = datas.textScale;
+                ImGui::GetStyle().FontScaleMain = datas.textScale;
             }
             ImGui::EndTabItem();
         }
