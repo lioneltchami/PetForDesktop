@@ -91,10 +91,17 @@ void MonitorTopologyCache::sampleNow()
         if (topology.pixelSize.x <= 0 || topology.pixelSize.y <= 0)
             continue;
 
-        topology.position.x = static_cast<int>(std::round(static_cast<float>(topology.pixelPosition.x) / safeScaleX));
-        topology.position.y = static_cast<int>(std::round(static_cast<float>(topology.pixelPosition.y) / safeScaleY));
-        topology.size.x = static_cast<int>(std::round(static_cast<float>(topology.pixelSize.x) / safeScaleX));
-        topology.size.y = static_cast<int>(std::round(static_cast<float>(topology.pixelSize.y) / safeScaleY));
+        const int logicalLeft = static_cast<int>(std::floor(static_cast<float>(topology.pixelPosition.x) / safeScaleX));
+        const int logicalTop  = static_cast<int>(std::floor(static_cast<float>(topology.pixelPosition.y) / safeScaleY));
+        const int logicalRight = static_cast<int>(std::ceil(
+            static_cast<float>(topology.pixelPosition.x + topology.pixelSize.x) / safeScaleX));
+        const int logicalBottom = static_cast<int>(std::ceil(
+            static_cast<float>(topology.pixelPosition.y + topology.pixelSize.y) / safeScaleY));
+
+        topology.position.x = logicalLeft;
+        topology.position.y = logicalTop;
+        topology.size.x     = std::max(1, logicalRight - logicalLeft);
+        topology.size.y     = std::max(1, logicalBottom - logicalTop);
 
         if (topology.contentScale.x <= 0.f || topology.contentScale.y <= 0.f)
             topology.contentScale = Vec2::one();

@@ -11,6 +11,24 @@
 #include <string>
 #include <vector>
 
+namespace
+{
+float clampScale(float scale)
+{
+    return std::max(scale, 0.01f);
+}
+
+int logicalFloor(float pixelPos, float scale)
+{
+    return static_cast<int>(std::floor(pixelPos / scale));
+}
+
+int logicalCeil(float pixelPos, float scale)
+{
+    return static_cast<int>(std::ceil(pixelPos / scale));
+}
+} // namespace
+
 #ifdef _WIN32
 #include <shobjidl.h>
 #include <windows.h>
@@ -139,15 +157,13 @@ public:
 
             Vec2 scale{1.f, 1.f};
             getMonitorContentScale(i, scale);
-            const float safeScaleX = std::max(scale.x, 0.01f);
-            const float safeScaleY = std::max(scale.y, 0.01f);
+            const float safeScaleX = clampScale(scale.x);
+            const float safeScaleY = clampScale(scale.y);
 
-            const int logicalLeft = static_cast<int>(std::floor(monitorPixelPos.x / safeScaleX));
-            const int logicalTop = static_cast<int>(std::floor(monitorPixelPos.y / safeScaleY));
-            const int logicalRight =
-                static_cast<int>(std::ceil((monitorPixelPos.x + monitorPixelSize.x) / safeScaleX));
-            const int logicalBottom =
-                static_cast<int>(std::ceil((monitorPixelPos.y + monitorPixelSize.y) / safeScaleY));
+            const int logicalLeft = logicalFloor(static_cast<float>(monitorPixelPos.x), safeScaleX);
+            const int logicalTop = logicalFloor(static_cast<float>(monitorPixelPos.y), safeScaleY);
+            const int logicalRight = logicalCeil(static_cast<float>(monitorPixelPos.x + monitorPixelSize.x), safeScaleX);
+            const int logicalBottom = logicalCeil(static_cast<float>(monitorPixelPos.y + monitorPixelSize.y), safeScaleY);
 
             minX = std::min(minX, logicalLeft);
             minY = std::min(minY, logicalTop);
@@ -174,11 +190,11 @@ public:
 
         Vec2 scale{1.f, 1.f};
         getMonitorContentScale(index, scale);
-        const float safeScaleX = std::max(scale.x, 0.01f);
-        const float safeScaleY = std::max(scale.y, 0.01f);
+        const float safeScaleX = clampScale(scale.x);
+        const float safeScaleY = clampScale(scale.y);
 
-        position.x = static_cast<int>(std::round(pixelPosition.x / safeScaleX));
-        position.y = static_cast<int>(std::round(pixelPosition.y / safeScaleY));
+        position.x = logicalFloor(static_cast<float>(pixelPosition.x), safeScaleX);
+        position.y = logicalFloor(static_cast<float>(pixelPosition.y), safeScaleY);
     }
 
     void getMonitorSize(int index, Vec2i& size) const override
@@ -195,11 +211,18 @@ public:
 
         Vec2 scale{1.f, 1.f};
         getMonitorContentScale(index, scale);
-        const float safeScaleX = std::max(scale.x, 0.01f);
-        const float safeScaleY = std::max(scale.y, 0.01f);
+        const float safeScaleX = clampScale(scale.x);
+        const float safeScaleY = clampScale(scale.y);
 
-        size.x = static_cast<int>(std::round(pixelSize.x / safeScaleX));
-        size.y = static_cast<int>(std::round(pixelSize.y / safeScaleY));
+        Vec2i pixelPosition = Vec2i::zero();
+        getMonitorPixelPosition(index, pixelPosition);
+        const int logicalLeft = logicalFloor(static_cast<float>(pixelPosition.x), safeScaleX);
+        const int logicalTop  = logicalFloor(static_cast<float>(pixelPosition.y), safeScaleY);
+        const int logicalRight = logicalCeil(static_cast<float>(pixelPosition.x + pixelSize.x), safeScaleX);
+        const int logicalBottom = logicalCeil(static_cast<float>(pixelPosition.y + pixelSize.y), safeScaleY);
+
+        size.x = std::max(1, logicalRight - logicalLeft);
+        size.y = std::max(1, logicalBottom - logicalTop);
     }
 
     Vec2i getMonitorPhysicalSize() const override

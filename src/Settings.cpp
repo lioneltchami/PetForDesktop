@@ -4,9 +4,16 @@
 #include "yaml-cpp/yaml.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <errno.h>
+#include <filesystem>
+#include <fstream>
+#include <system_error>
+#include <string>
+#include <string_view>
+#include <type_traits>
 
 #ifndef _WIN32
 inline int fopen_s(FILE** file, const char* filename, const char* mode)
@@ -39,42 +46,32 @@ constexpr float kMaxCollisionRatio = 1.f;
 constexpr float kMinPositiveFloat = 0.0001f;
 constexpr int kMinFootBasement = 1;
 
-float clampFloat(float value, float minValue, float maxValue)
+constexpr std::array<std::string_view, 8> kAllowedSections = {"Game", "Physic", "GamePlay", "Window", "Style",
+                                                           "Accessibility", "Debug", "Graphics", "Display"};
+
+constexpr std::array<std::string_view, 2> kGameSectionKeys = {"FPS", "RandomSeed"};
+constexpr std::array<std::string_view, 11> kPhysicsSectionKeys = {
+    "PhysicFrameRate",
+    "Bounciness",
+    "GravityX",
+    "GravityY",
+    "Friction",
+    "ContinuousCollisionMaxVelocity",
+    "FootBasementWidth",
+    "FootBasementHeight",
+    "CollisionPixelRatioStopMovement",
+    "IsGroundedDetection",
+    "InputReleaseImpulse"};
+constexpr std::array<std::string_view, 1> kGamePlaySectionKeys = {"CoyoteTimeCursorMovement"};
+constexpr std::array<std::string_view, 5> kWindowSectionKeys = {"FullScreenWindow", "ShowWindow", "ShowFrameBufferBackground",
+                                                                "UseForwardWindow", "UseMousePassThoughWindow"};
+constexpr std::array<std::string_view, 1> kStyleSectionKeys = {"Theme"};
+constexpr std::array<std::string_view, 2> kAccessibilitySectionKeys = {"Scale", "TextScale"};
+constexpr std::array<std::string_view, 1> kDebugSectionKeys = {"ShowEdgeDetection"};
+
+inline bool isAllowedSection(std::string_view sectionName)
 {
-    return std::clamp(value, minValue, maxValue);
-}
-
-int clampInt(int value, int minValue, int maxValue)
-{
-    return std::clamp(value, minValue, maxValue);
-}
-
-bool isFiniteFloat(float value)
-{
-    return std::isfinite(value);
-}
-
-bool extractSection(const YAML::Node& root, const char* key, YAML::Node& out)
-{
-    if (root[key])
-    {
-        out = root[key];
-        return true;
-    }
-
-    if (!root.IsSequence())
-        return false;
-
-    for (const auto& roleItem : root)
-    {
-        if (roleItem[key])
-        {
-            out = roleItem[key];
-            return true;
-        }
-    }
-
-    return false;
+    return std::find(kAllowedSections.begin(), kAllowedSections.end(), sectionName) != kAllowedSections.end();
 }
 
 template <typename T>
@@ -86,13 +83,175 @@ bool readScalar(const YAML::Node& section, const char* key, T& value)
 
     try
     {
-        value = entry.as<T>();
-        return true;
+        if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>)
+        {
+            const T typedValue = entry.as<T>();
+            if (!std::isfinite(typedValue))
+                return false;
+            value = typedValue;
+            return true;
+        }
+        else
+        {
+            value = entry.as<T>();
+            return true;
+        }
     }
     catch (...)
     {
         return false;
     }
+}
+
+template <typename T, size_t N>
+bool inArray(std::string_view key, const std::array<std::string_view, N>& allowed)
+{
+    for (const auto& candidate : allowed)
+    {
+        if (key == candidate)
+            return true;
+    }
+
+    return false;
+}
+
+template <size_t N>
+void warnUnknownKeys(const YAML::Node& section, std::string_view sectionName,
+                    const std::array<std::string_view, N>& allowed)
+{
+    if (!section.IsMap())
+        return;
+
+    for (const auto& item : section)
+    {
+        const auto keyNode = item.first;
+        if (!keyNode)
+            continue;
+
+        const std::string key = keyNode.as<std::string>("");
+        if (key.empty())
+            continue;
+
+        if (!inArray(std::string_view{key}, allowed))
+        {
+            warning((std::string("Unknown setting key '") + key + "' in section '" + std::string(sectionName) +
+                     "', using defaults.")
+                        .c_str());
+        }
+    }
+}
+
+void warnUnknownSections(const YAML::Node& root)
+{
+    if (root.IsMap())
+    {
+        for (const auto& item : root)
+        {
+            if (!item.first.IsScalar())
+                continue;
+
+            const std::string name = item.first.as<std::string>("");
+            if (!name.empty() && !isAllowedSection(name))
+                warning((std::string("Unknown settings section '") + name + "', ignoring.").c_str());
+        }
+        return;
+    }
+
+    if (root.IsSequence())
+    {
+        for (const auto& entry : root)
+        {
+            if (!entry.IsMap())
+                continue;
+
+            for (const auto& item : entry)
+            {
+                if (!item.first.IsScalar())
+                    continue;
+
+                const std::string name = item.first.as<std::string>("");
+                if (!name.empty() && !isAllowedSection(name))
+                    warning((std::string("Unknown settings section '") + name + "', ignoring.").c_str());
+            }
+        }
+    }
+}
+
+bool getSection(const YAML::Node& root, const char* sectionName, YAML::Node& section)
+{
+    if (root.IsMap())
+    {
+        const YAML::Node candidate = root[sectionName];
+        if (!candidate)
+            return false;
+
+        section = candidate;
+        return true;
+    }
+
+    if (!root.IsSequence())
+        return false;
+
+    for (const auto& entry : root)
+    {
+        if (!entry.IsMap())
+            continue;
+
+        const YAML::Node candidate = entry[sectionName];
+        if (!candidate)
+            continue;
+
+        section = candidate;
+        return true;
+    }
+
+    return false;
+}
+
+void clampAndNormalize(GameData& data)
+{
+    auto clampFloat = [](float value, float minValue, float maxValue, float fallback) {
+        if (!std::isfinite(value))
+            return fallback;
+
+        return std::clamp(value, minValue, maxValue);
+    };
+
+    auto clampInt = [](int value, int minValue, int maxValue) {
+        return std::clamp(value, minValue, maxValue);
+    };
+
+    data.FPS       = clampInt(data.FPS, kMinFPS, kMaxFPS);
+    data.scale     = clampInt(data.scale, kMinScale, kMaxScale);
+    data.textScale = clampFloat(data.textScale, kMinTextScale, kMaxTextScale, 1.f);
+
+    data.physicFrameRate = clampInt(data.physicFrameRate, kMinPhysicsFrameRate, kMaxPhysicsFrameRate);
+
+    data.gravity.x = clampFloat(data.gravity.x, kMinGravity, kMaxGravity, 0.f);
+    data.gravity.y = clampFloat(data.gravity.y, kMinGravity, kMaxGravity, 9.81f);
+    if (data.gravity.sqrLength() > 0.f && std::isfinite(data.gravity.x) && std::isfinite(data.gravity.y))
+        data.gravityDir = data.gravity.normalized();
+    else
+        data.gravityDir = {0.f, 1.f};
+
+    data.bounciness = clampFloat(data.bounciness, kMinBounciness, kMaxBounciness, 0.6f);
+    data.friction   = clampFloat(data.friction, kMinFriction, kMaxFriction, 0.85f);
+    data.continuousCollisionMaxSqrVelocity =
+        std::max(kMinPositiveFloat, clampFloat(std::sqrt(data.continuousCollisionMaxSqrVelocity),
+                                                kMinPositiveFloat, 200.f, kMinPositiveFloat));
+    data.continuousCollisionMaxSqrVelocity = data.continuousCollisionMaxSqrVelocity * data.continuousCollisionMaxSqrVelocity;
+
+    data.footBasementWidth = std::max(kMinFootBasement, data.footBasementWidth);
+    data.footBasementHeight = std::max(kMinFootBasement, data.footBasementHeight);
+
+    data.collisionPixelRatioStopMovement = clampFloat(data.collisionPixelRatioStopMovement, kMinCollisionRatio, kMaxCollisionRatio,
+                                                    0.3f);
+    data.isGroundedDetection = std::max(kMinPositiveFloat, data.isGroundedDetection);
+    data.releaseImpulse     = std::max(kMinPositiveFloat, data.releaseImpulse);
+    data.coyoteTimeCursorPos = std::max(kMinPositiveFloat, data.coyoteTimeCursorPos);
+
+    if (data.styleName.empty())
+        data.styleName = "PetForDesktop";
 }
 
 void applyDefaults(GameData& data)
@@ -123,38 +282,7 @@ void applyDefaults(GameData& data)
     data.styleName                 = "PetForDesktop";
     data.debugEdgeDetection        = false;
 }
-
-void clampAndNormalize(GameData& data)
-{
-    data.FPS        = clampInt(data.FPS, kMinFPS, kMaxFPS);
-    data.scale      = clampInt(data.scale, kMinScale, kMaxScale);
-    data.textScale  = std::roundf(clampFloat(data.textScale, kMinTextScale, kMaxTextScale) * 10.f) / 10.f;
-
-    data.physicFrameRate = clampInt(data.physicFrameRate, kMinPhysicsFrameRate, kMaxPhysicsFrameRate);
-
-    data.gravity.x = clampFloat(data.gravity.x, kMinGravity, kMaxGravity);
-    data.gravity.y = clampFloat(data.gravity.y, kMinGravity, kMaxGravity);
-    data.gravityDir = (data.gravity.sqrLength() > 0.f && isFiniteFloat(data.gravity.x) && isFiniteFloat(data.gravity.y))
-                         ? data.gravity.normalized()
-                         : Vec2{0.f, 1.f};
-
-    data.bounciness = clampFloat(data.bounciness, kMinBounciness, kMaxBounciness);
-    data.friction   = clampFloat(data.friction, kMinFriction, kMaxFriction);
-    data.continuousCollisionMaxSqrVelocity =
-        std::max(kMinPositiveFloat,
-                 data.continuousCollisionMaxSqrVelocity * data.continuousCollisionMaxSqrVelocity);
-
-    data.footBasementWidth  = std::max(kMinFootBasement, data.footBasementWidth);
-    data.footBasementHeight = std::max(kMinFootBasement, data.footBasementHeight);
-    data.collisionPixelRatioStopMovement = clampFloat(data.collisionPixelRatioStopMovement, kMinCollisionRatio, kMaxCollisionRatio);
-    data.isGroundedDetection           = std::max(kMinPositiveFloat, data.isGroundedDetection);
-    data.releaseImpulse                = std::max(kMinPositiveFloat, data.releaseImpulse);
-    data.coyoteTimeCursorPos           = std::max(kMinPositiveFloat, data.coyoteTimeCursorPos);
-
-    if (data.styleName.empty())
-        data.styleName = "PetForDesktop";
 }
-} // namespace
 
 void Setting::importFile(const char* src, GameData& data)
 {
@@ -177,17 +305,25 @@ void Setting::importFile(const char* src, GameData& data)
         return;
     }
 
-    YAML::Node section;
+    warnUnknownSections(root);
 
-    if (extractSection(root, "Game", section))
+    YAML::Node section;
+    if (getSection(root, "Game", section))
     {
+        warnUnknownKeys(section, "Game", kGameSectionKeys);
+
         readScalar(section, "FPS", data.FPS);
         readScalar(section, "RandomSeed", data.randomSeed);
     }
 
-    if (extractSection(root, "Physic", section))
+    if (getSection(root, "Physic", section))
     {
-        readScalar(section, "PhysicFrameRate", data.physicFrameRate);
+        warnUnknownKeys(section, "Physic", kPhysicsSectionKeys);
+
+        int physicFrameRate;
+        if (readScalar(section, "PhysicFrameRate", physicFrameRate))
+            data.physicFrameRate = physicFrameRate;
+
         readScalar(section, "Bounciness", data.bounciness);
         readScalar(section, "GravityX", data.gravity.x);
         readScalar(section, "GravityY", data.gravity.y);
@@ -197,56 +333,90 @@ void Setting::importFile(const char* src, GameData& data)
         if (readScalar(section, "ContinuousCollisionMaxVelocity", maxVelocity))
             data.continuousCollisionMaxSqrVelocity = maxVelocity;
 
-        readScalar(section, "FootBasementWidth", data.footBasementWidth);
-        readScalar(section, "FootBasementHeight", data.footBasementHeight);
+        int basementWidth;
+        if (readScalar(section, "FootBasementWidth", basementWidth))
+            data.footBasementWidth = basementWidth;
+
+        int basementHeight;
+        if (readScalar(section, "FootBasementHeight", basementHeight))
+            data.footBasementHeight = basementHeight;
+
         readScalar(section, "CollisionPixelRatioStopMovement", data.collisionPixelRatioStopMovement);
         readScalar(section, "IsGroundedDetection", data.isGroundedDetection);
         readScalar(section, "InputReleaseImpulse", data.releaseImpulse);
     }
 
-    if (extractSection(root, "GamePlay", section))
+    if (getSection(root, "GamePlay", section))
     {
+        warnUnknownKeys(section, "GamePlay", kGamePlaySectionKeys);
+
         readScalar(section, "CoyoteTimeCursorMovement", data.coyoteTimeCursorPos);
     }
 
-    if (extractSection(root, "Window", section))
+    if (getSection(root, "Window", section))
     {
-        readScalar(section, "FullScreenWindow", data.fullScreenWindow);
-        readScalar(section, "ShowWindow", data.showWindow);
-        readScalar(section, "ShowFrameBufferBackground", data.showFrameBufferBackground);
-        readScalar(section, "UseForwardWindow", data.useForwardWindow);
-        readScalar(section, "UseMousePassThoughWindow", data.useMousePassThoughWindow);
+        warnUnknownKeys(section, "Window", kWindowSectionKeys);
+
+        bool value = false;
+        if (readScalar(section, "FullScreenWindow", value))
+            data.fullScreenWindow = value;
+
+        if (readScalar(section, "ShowWindow", value))
+            data.showWindow = value;
+
+        if (readScalar(section, "ShowFrameBufferBackground", value))
+            data.showFrameBufferBackground = value;
+
+        if (readScalar(section, "UseForwardWindow", value))
+            data.useForwardWindow = value;
+
+        if (readScalar(section, "UseMousePassThoughWindow", value))
+            data.useMousePassThoughWindow = value;
     }
 
-    if (extractSection(root, "Style", section))
+    if (getSection(root, "Style", section))
     {
+        warnUnknownKeys(section, "Style", kStyleSectionKeys);
+
         std::string theme;
         if (readScalar(section, "Theme", theme))
             data.styleName = theme;
     }
 
-    if (extractSection(root, "Accessibility", section))
+    if (getSection(root, "Accessibility", section))
     {
-        readScalar(section, "Scale", data.scale);
+        warnUnknownKeys(section, "Accessibility", kAccessibilitySectionKeys);
+
+        int scale;
+        if (readScalar(section, "Scale", scale))
+            data.scale = scale;
+
         readScalar(section, "TextScale", data.textScale);
     }
 
-    if (extractSection(root, "Debug", section))
+    if (getSection(root, "Debug", section))
     {
-        readScalar(section, "ShowEdgeDetection", data.debugEdgeDetection);
+        warnUnknownKeys(section, "Debug", kDebugSectionKeys);
+
+        bool debugValue = false;
+        if (readScalar(section, "ShowEdgeDetection", debugValue))
+            data.debugEdgeDetection = debugValue;
     }
 
-    clampAndNormalize(data);
+    Setting::sanitize(data);
 }
 
 void Setting::exportFile(const char* dest, GameData& data)
 {
     Setting::clampForRuntime(data);
 
-    FILE* file = nullptr;
-    if (fopen_s(&file, dest, "wt"))
+    const std::filesystem::path destinationPath(dest);
+    const std::filesystem::path tempPath = destinationPath.string() + ".tmp";
+
+    std::ofstream output(tempPath, std::ios::out | std::ios::binary | std::ios::trunc);
+    if (!output)
     {
-        logf("The file \"%s\" was not opened to write\n", dest);
+        logf("Could not open temporary file \"%s\" for settings write\n", tempPath.string().c_str());
         return;
     }
 
@@ -341,8 +511,29 @@ void Setting::exportFile(const char* dest, GameData& data)
     }
 
     out << YAML::EndSeq;
-    fwrite(out.c_str(), sizeof(char), out.size(), file);
-    fclose(file);
+    output << out.c_str();
+    output.close();
+
+    if (!output)
+    {
+        logf("Failed to write settings temporary file \"%s\"\n", tempPath.string().c_str());
+        std::error_code cleanupError;
+        std::filesystem::remove(tempPath, cleanupError);
+        return;
+    }
+
+    std::error_code removeError;
+    std::filesystem::remove(destinationPath, removeError);
+
+    std::error_code renameError;
+    std::filesystem::rename(tempPath, destinationPath, renameError);
+    if (renameError)
+    {
+        logf("Failed to swap settings file \"%s\" atomically: %s\n", destinationPath.string().c_str(),
+             renameError.message().c_str());
+        std::error_code cleanupError;
+        std::filesystem::remove(tempPath, cleanupError);
+    }
 }
 
 bool Setting::sanitize(GameData& data)

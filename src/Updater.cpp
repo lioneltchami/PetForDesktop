@@ -5,22 +5,30 @@
 #include "Game/UpdateMenu.hpp"
 
 #include <array>
-#include <cctype>
+#include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <regex>
 #include <sstream>
 #include <string>
+#include <system_error>
 
 #include <cpr/cpr.h>
 
 namespace
 {
 constexpr const char* kReleaseApiEndpoint = "https://api.github.com/repos/Renardjojo/PetDesktop/releases/latest";
-constexpr std::size_t kMaxDownloadBytes = 1024 * 1024 * 300; // 300MB hard cap per update payload
+constexpr std::size_t kMaxDownloadBytes = 1024u * 1024u * 300u; // 300MB hard cap per update payload
+constexpr std::size_t kMaxMetadataBytes = 1024u * 1024u; // 1MB metadata payload cap
+constexpr std::size_t kMaxReleaseNotesBytes = 1024u * 1024u; // 1MB
+constexpr std::size_t kMaxAssetUrlLength = 4096;
 
 struct Version
 {
@@ -36,9 +44,9 @@ bool parseVersion(const std::string& tag, Version& version)
         return false;
 
     std::istringstream stream{tag.substr(firstDigit)};
-    char dot;
+    char               dot;
     stream >> version.major >> dot >> version.minor >> dot >> version.patch;
-    return stream;
+    return static_cast<bool>(stream);
 }
 
 bool isGreaterVersion(const std::string& current, const std::string& incoming)
@@ -146,28 +154,105 @@ bool parseJsonStringField(const std::string& text, const std::string& key, std::
     return false;
 }
 
-bool isMatchForCurrentPlatform(const std::string& lowerName)
+bool parseJsonUnsignedField(const std::string& text, const std::string& key, std::uint64_t& value,
+                           std::size_t begin = 0)
 {
-#ifdef _WIN32
-    return lowerName.find(".exe") != std::string::npos;
-#else
-    return true;
-#endif
+    const std::string pattern = "\"" + key + "\"";
+    const auto keyPos         = text.find(pattern, begin);
+    if (keyPos == std::string::npos)
+        return false;
+
+    const auto colonPos = text.find(':', keyPos);
+    if (colonPos == std::string::npos)
+        return false;
+
+    std::size_t cursor = colonPos + 1;
+    while (cursor < text.size() && std::isspace(static_cast<unsigned char>(text[cursor])))
+        ++cursor;
+
+    if (cursor >= text.size() || !std::isdigit(static_cast<unsigned char>(text[cursor])))
+        return false;
+
+    std::size_t end = cursor;
+    while (end < text.size() && std::isdigit(static_cast<unsigned char>(text[end])))
+        ++end;
+
+    try
+    {
+        const auto valueText = text.substr(cursor, end - cursor);
+        if (valueText.size() > 20)
+            return false;
+        value = std::stoull(valueText);
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
 }
 
-bool shouldPreferNameForPlatform(const std::string& lowerName)
+bool isValidHexDigest(const std::string& value)
 {
-#ifdef _WIN32
-    return lowerName.find("windows") != std::string::npos || lowerName.find("win") != std::string::npos;
-#else
+    if (value.empty())
+        return false;
+
+    for (unsigned char c : value)
+    {
+        if (!std::isxdigit(c))
+            return false;
+    }
+
     return true;
-#endif
 }
 
-void toLower(std::string& value)
+bool isValidSignatureFormat(const std::string& signature)
 {
+    if (signature.empty())
+        return false;
+
+    for (unsigned char c : signature)
+    {
+        if (std::isspace(c) || c < 33 || c > 126)
+            return false;
+    }
+
+    return true;
+}
+
+bool isHttpsUrl(const std::string& value)
+{
+    if (value.rfind("https://", 0) != 0)
+        return false;
+
+    if (value.size() > kMaxAssetUrlLength)
+        return false;
+
+    if (value.find('\n') != std::string::npos || value.find('\r') != std::string::npos ||
+        value.find('\t') != std::string::npos)
+        return false;
+
+    return true;
+}
+
+std::string sanitizeFileName(std::string value)
+{
+    if (value.empty())
+        return std::string("PetForDesktop-Update.bin");
+
     for (auto& c : value)
-        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    {
+        if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' ||
+            c == '|' || c == ';')
+            c = '_';
+    }
+
+    while (!value.empty() && (value[0] == '.' || value[0] == ' '))
+        value.erase(value.begin());
+
+    if (value.empty())
+        return std::string("PetForDesktop-Update.bin");
+
+    return value;
 }
 
 bool parseAssetList(const std::string& releaseJson, std::vector<UpdateAssetMetadata>& assets)
@@ -192,7 +277,7 @@ bool parseAssetList(const std::string& releaseJson, std::vector<UpdateAssetMetad
 
         int depth = 0;
         std::size_t objectEnd = objectStart;
-        for ( ; objectEnd < block.size(); ++objectEnd)
+        for (; objectEnd < block.size(); ++objectEnd)
         {
             if (block[objectEnd] == '{')
                 ++depth;
@@ -211,14 +296,32 @@ bool parseAssetList(const std::string& releaseJson, std::vector<UpdateAssetMetad
 
         UpdateAssetMetadata asset;
         std::string sizeValue;
-        if (parseJsonStringField(item, "name", asset.name) &&
-            parseJsonStringField(item, "browser_download_url", asset.downloadUrl))
+        if (!parseJsonStringField(item, "name", asset.name))
         {
-            parseJsonStringField(item, "size", sizeValue);
-            asset.size = sizeValue;
-            assets.emplace_back(std::move(asset));
+            cursor = objectEnd + 1;
+            continue;
         }
 
+        if (!parseJsonStringField(item, "browser_download_url", asset.downloadUrl))
+        {
+            cursor = objectEnd + 1;
+            continue;
+        }
+
+        if (!isHttpsUrl(asset.downloadUrl))
+        {
+            cursor = objectEnd + 1;
+            continue;
+        }
+
+        parseJsonUnsignedField(item, "size", asset.sizeBytes);
+        asset.size = sizeValue;
+        if (asset.sizeBytes > 0)
+            asset.size = std::to_string(asset.sizeBytes);
+        else
+            parseJsonStringField(item, "size", asset.size);
+
+        assets.emplace_back(std::move(asset));
         cursor = objectEnd + 1;
     }
 
@@ -228,13 +331,12 @@ bool parseAssetList(const std::string& releaseJson, std::vector<UpdateAssetMetad
 bool parseManifestFromText(const std::string& manifestText, UpdateMetadata& metadata)
 {
     bool hasAny = false;
-    if (!metadata.packageUrl.empty())
-        hasAny = true;
 
     std::string value;
-    if (parseJsonStringField(manifestText, "package", value))
+    if (parseJsonStringField(manifestText, "package", value) || parseJsonStringField(manifestText, "url", value) ||
+        parseJsonStringField(manifestText, "packageUrl", value))
     {
-        if (!value.empty())
+        if (isHttpsUrl(value))
         {
             metadata.packageUrl = value;
             metadata.packageName = std::filesystem::path(value).filename().string();
@@ -242,44 +344,53 @@ bool parseManifestFromText(const std::string& manifestText, UpdateMetadata& meta
         }
     }
 
-    if (parseJsonStringField(manifestText, "url", value))
-    {
-        if (!value.empty())
-        {
-            metadata.packageUrl = value;
-            metadata.packageName = std::filesystem::path(value).filename().string();
-            hasAny = true;
-        }
-    }
-
-    if (parseJsonStringField(manifestText, "sha256", value) || parseJsonStringField(manifestText, "checksum", value))
+    if (parseJsonStringField(manifestText, "checksum", value) || parseJsonStringField(manifestText, "sha256", value))
     {
         if (!value.empty())
         {
             metadata.checksum = value;
-            hasAny = true;
+            hasAny       = true;
         }
     }
 
     if (parseJsonStringField(manifestText, "signature", value))
     {
         metadata.signature = value;
-        hasAny = true;
+    }
+
+    if (parseJsonStringField(manifestText, "signature_algorithm", value))
+    {
+        metadata.signatureAlgorithm = value;
+    }
+
+    if (parseJsonStringField(manifestText, "signature_public_key", value))
+    {
+        metadata.signaturePublicKey = value;
     }
 
     if (parseJsonStringField(manifestText, "checksum_algorithm", value))
     {
-        if (!value.empty())
-            metadata.checksumAlgorithm = value;
+        metadata.checksumAlgorithm = value;
     }
+
+    std::uint64_t packageSize = 0;
+    if (parseJsonUnsignedField(manifestText, "package_size", packageSize))
+        metadata.packageSize = packageSize;
 
     return hasAny;
 }
 
 bool downloadToString(const std::string& url, std::string& payload, std::string& error)
 {
+    if (!isHttpsUrl(url))
+    {
+        error = "Update URL is not HTTPS";
+        return false;
+    }
+
     const auto response = cpr::Get(cpr::Url{url}, cpr::VerifySsl{true}, cpr::ssl::VerifyHost{true}, cpr::ssl::VerifyPeer{true},
-                               cpr::Header{{"User-Agent", PROJECT_NAME "/" PROJECT_VERSION}});
+                                   cpr::Header{{"User-Agent", PROJECT_NAME "/" PROJECT_VERSION}}, cpr::Timeout{20000},
+                                   cpr::Redirect{true}, cpr::MaxRedirects{3});
     if (response.error)
     {
         error = response.error.message;
@@ -289,6 +400,18 @@ bool downloadToString(const std::string& url, std::string& payload, std::string&
     if (response.status_code < 200 || response.status_code >= 300)
     {
         error = "HTTP status " + std::to_string(response.status_code);
+        return false;
+    }
+
+    if (payload.size() > std::numeric_limits<std::size_t>::max())
+    {
+        error = "Update payload response too large";
+        return false;
+    }
+
+    if (response.text.size() > kMaxMetadataBytes)
+    {
+        error = "Metadata response exceeds security cap";
         return false;
     }
 
@@ -331,6 +454,73 @@ bool downloadToFile(const std::string& url, const std::filesystem::path& staging
     }
 
     return true;
+}
+
+bool validateMetadataEnvelope(const UpdateMetadata& metadata, std::string& error)
+{
+    if (metadata.tag.empty())
+    {
+        error = "Metadata missing release tag";
+        return false;
+    }
+
+    if (!metadata.packageName.empty() && !isHttpsUrl(metadata.packageUrl))
+    {
+        error = "Package URL is not HTTPS";
+        return false;
+    }
+
+    if (!metadata.checksum.empty())
+    {
+        std::string checksum = metadata.checksum;
+        checksum.erase(std::remove_if(checksum.begin(), checksum.end(), [](char c) { return c == ' ' || c == '\t'; }),
+                      checksum.end());
+        if (metadata.checksumAlgorithm.empty())
+        {
+            error = "Checksum algorithm missing";
+            return false;
+        }
+
+        if (checksum.size() != 64)
+        {
+            error = "Unexpected checksum length";
+            return false;
+        }
+
+        if (!isValidHexDigest(checksum))
+        {
+            error = "Checksum contains non-hex characters";
+            return false;
+        }
+    }
+
+    if (!metadata.signature.empty())
+    {
+        if (metadata.signatureAlgorithm.empty())
+        {
+            error = "Signed metadata missing signature algorithm";
+            return false;
+        }
+
+        if (!isValidSignatureFormat(metadata.signature))
+        {
+            error = "Signed metadata uses unsupported signature format";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool verifySignedMetadata(const UpdateMetadata& metadata, std::string& error)
+{
+    if (metadata.signature.empty())
+        return true;
+
+    // Signature verification requires a trust-root and public key in this codebase.
+    (void)metadata;
+    error = "Signed metadata detected but signature verification is unavailable in this build";
+    return false;
 }
 
 class SHA256
@@ -405,9 +595,7 @@ private:
 
         uint32_t w[64] = {0};
         for (int i = 0; i < 16; ++i)
-        {
             pack32(&block[i * 4], w[i]);
-        }
 
         for (int i = 16; i < 64; ++i)
         {
@@ -428,14 +616,15 @@ private:
         {
             const uint32_t t1 = h + bigSig1(e) + ch(e, f, g) + k[i] + w[i];
             const uint32_t t2 = bigSig0(a) + maj(a, b, c);
-            h                = g;
-            g                = f;
-            f                = e;
-            e                = d + t1;
-            d                = c;
-            c                = b;
-            b                = a;
-            a                = t1 + t2;
+
+            h = g;
+            g = f;
+            f = e;
+            e = d + t1;
+            d = c;
+            c = b;
+            b = a;
+            a = t1 + t2;
         }
 
         m_state[0] += a;
@@ -503,7 +692,6 @@ public:
         for (uint8_t byte : hash)
             out << std::setw(2) << static_cast<int>(byte);
 
-        // reset
         m_state[0] = 0x6a09e667;
         m_state[1] = 0xbb67ae85;
         m_state[2] = 0x3c6ef372;
@@ -581,7 +769,11 @@ bool Updater::fetchReleaseMetadata(UpdateMetadata& metadata, std::string& error)
         return false;
     }
 
-    parseJsonStringField(releaseJson, "body", metadata.releaseNotes);
+    std::string releaseNotes;
+    parseJsonStringField(releaseJson, "body", releaseNotes);
+    if (releaseNotes.size() > kMaxReleaseNotesBytes)
+        releaseNotes.resize(kMaxReleaseNotesBytes);
+    metadata.releaseNotes = releaseNotes;
 
     parseAssetList(releaseJson, metadata.assets);
     if (metadata.assets.empty())
@@ -590,25 +782,31 @@ bool Updater::fetchReleaseMetadata(UpdateMetadata& metadata, std::string& error)
         return false;
     }
 
-    // Optional manifest object can provide checksum and signature details.
+    // Optional manifest asset can provide checksum and signature.
     for (const auto& asset : metadata.assets)
     {
-        const std::string candidateName = asset.name;
+        std::string candidateName = asset.name;
         std::string lowerName = candidateName;
-        toLower(lowerName);
+        for (auto& c : lowerName)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
-        if (lowerName.find(".json") != std::string::npos && (lowerName.find("manifest") != std::string::npos ||
-                                                             lowerName.find("update") != std::string::npos))
+        if (lowerName.find("manifest") != std::string::npos && (lowerName.find(".json") != std::string::npos ||
+                                                                lowerName.find(".txt") != std::string::npos))
         {
             std::string manifestText;
             if (downloadToString(asset.downloadUrl, manifestText, error))
             {
                 parseManifestFromText(manifestText, metadata);
                 metadata.packageName = asset.name;
-                break;
             }
         }
     }
+
+    if (!validateMetadataEnvelope(metadata, error))
+        return false;
+
+    if (!verifySignedMetadata(metadata, error))
+        return false;
 
     return true;
 }
@@ -619,9 +817,13 @@ bool Updater::resolvePlatformPackage(const UpdateMetadata& metadata, UpdateMetad
     for (const auto& asset : metadata.assets)
     {
         std::string lower = asset.name;
-        toLower(lower);
+        for (auto& c : lower)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
-        if (!isMatchForCurrentPlatform(lower))
+        if (lower.find(".exe") == std::string::npos)
+            continue;
+
+        if (!isHttpsUrl(asset.downloadUrl))
             continue;
 
         candidates.emplace_back(asset);
@@ -633,25 +835,33 @@ bool Updater::resolvePlatformPackage(const UpdateMetadata& metadata, UpdateMetad
         return false;
     }
 
-    const auto prefer = [&](const std::vector<UpdateAssetMetadata>& input) -> const UpdateAssetMetadata*
+    std::vector<UpdateAssetMetadata> preferred;
+    for (const auto& candidate : candidates)
     {
-        for (const auto& candidate : input)
-        {
-            std::string lower = candidate.name;
-            toLower(lower);
-            if (shouldPreferNameForPlatform(lower))
-                return &candidate;
-        }
-        return nullptr;
-    };
+        std::string lower = candidate.name;
+        for (auto& c : lower)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
-    const UpdateAssetMetadata* preferred = prefer(candidates);
-    if (!preferred)
-        preferred = &candidates[0];
+        if (lower.find("windows") != std::string::npos || lower.find("win") != std::string::npos)
+            preferred.push_back(candidate);
+    }
+
+    const UpdateAssetMetadata* selected = nullptr;
+    if (!preferred.empty())
+        selected = &preferred.front();
+    else
+        selected = &candidates.front();
 
     resolved = metadata;
-    resolved.packageUrl = preferred->downloadUrl;
-    resolved.packageName = preferred->name;
+    resolved.packageUrl = selected->downloadUrl;
+    resolved.packageName = sanitizeFileName(selected->name);
+    resolved.packageSize = selected->sizeBytes;
+
+    if (resolved.packageUrl.empty())
+    {
+        error = "Selected asset missing download URL";
+        return false;
+    }
 
     return true;
 }
@@ -660,24 +870,43 @@ bool Updater::downloadAndStageUpdate(const UpdateMetadata& metadata, std::filesy
                                     std::string& error) const
 {
     const auto stageDir = std::filesystem::temp_directory_path();
-    const auto time     = std::chrono::steady_clock::now().time_since_epoch().count();
 
     const std::string fileName = metadata.packageName.empty() ? std::string("PetForDesktop-Update.bin") : metadata.packageName;
-    const std::filesystem::path stagedPath = stageDir / fileName;
+    const auto        safeName = sanitizeFileName(fileName);
+    const std::filesystem::path stagedPath = stageDir / safeName;
     const std::filesystem::path stagedPartPath = stagedPath.string() + ".part";
 
-    if (std::filesystem::exists(stagedPartPath))
-        std::filesystem::remove(stagedPartPath);
+    std::error_code cleanupError;
+    std::filesystem::remove(stagedPartPath, cleanupError);
 
     if (!downloadToFile(metadata.packageUrl, stagedPartPath, error))
         return false;
 
-    if (std::filesystem::exists(stagedPath))
-        std::filesystem::remove(stagedPath);
+    if (!metadata.packageUrl.empty())
+    {
+        std::error_code fileSizeError;
+        const auto fileSize = std::filesystem::file_size(stagedPartPath, fileSizeError);
+        if (!fileSizeError && metadata.packageSize > 0 && fileSize != metadata.packageSize)
+        {
+            std::filesystem::remove(stagedPartPath, cleanupError);
+            error = "Downloaded package size mismatch";
+            return false;
+        }
+    }
 
-    std::filesystem::rename(stagedPartPath, stagedPath);
+    std::error_code replaceError;
+    std::filesystem::remove(stagedPath, replaceError);
+
+    std::error_code renameError;
+    std::filesystem::rename(stagedPartPath, stagedPath, renameError);
+    if (renameError)
+    {
+        std::filesystem::remove(stagedPartPath, cleanupError);
+        error = renameError.message();
+        return false;
+    }
+
     stagedFile = stagedPath;
-
     logf("Update payload staged in %s\n", stagedFile.string().c_str());
     return true;
 }
@@ -691,17 +920,14 @@ bool Updater::verifyDownloadedPackage(const std::filesystem::path& stagedFile, c
         return false;
     }
 
-    if (!metadata.checksum.empty() && !isChecksumValid(stagedFile, metadata))
+    if (!isChecksumValid(stagedFile, metadata))
     {
         error = "Checksum verification failed";
         return false;
     }
 
-    if (!metadata.signature.empty())
-    {
-        // Signature verification is not implemented here, but signature data is preserved for future trust policy expansion.
-        log("Signed update metadata detected. Signature validation is currently not available in this build.\n");
-    }
+    if (!metadata.signature.empty() && !verifySignedMetadata(metadata, error))
+        return false;
 
     return true;
 }

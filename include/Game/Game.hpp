@@ -272,9 +272,10 @@ public:
 
         // fullscreen
         Vec2i monitorSize;
-        datas.monitors.getMonitorSize(0, monitorSize);
+        Vec2i monitorPos;
+        datas.monitors.getMainMonitorWorkingArea(monitorPos, monitorSize);
         datas.window->setSize(monitorSize);
-        datas.window->setPosition(Vec2::zero());
+        datas.window->setPosition(monitorPos);
         TimeManager::instance().setFrameRate(1);
         TimeManager::instance().emplaceTimer(
             [&]() {
