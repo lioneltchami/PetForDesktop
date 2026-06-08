@@ -36,6 +36,11 @@ public:
     void onMonitorConnectionChanged(void* monitor, int event)
     {
         if (!m_enumerator)
+        {
+            m_enumerator = PlatformServices::createWindowEnumerator();
+            return;
+        }
+        if (!m_enumerator)
             return;
         m_enumerator->onMonitorConnectionChanged(monitor, event);
     }
