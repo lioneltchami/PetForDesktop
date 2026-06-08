@@ -6,6 +6,7 @@
 #include "Engine/StateMachine.hpp"
 #include "Engine/TimeManager.hpp"
 #include "Engine/Updater.hpp"
+#include "Game/AnimationMotionLogic.hpp"
 #include "Game/AnimationTransitions.hpp"
 #include "Game/PetLogic.hpp"
 
@@ -838,6 +839,48 @@ bool test_pause_resume_and_release_velocity()
     return true;
 }
 
+bool test_seeded_walk_and_jump_golden_outcomes()
+{
+    const std::vector<Vec2> directions = {Vec2::left(), Vec2::right()};
+
+    std::srand(9001);
+    const Vec2 expectedDirection = directions[static_cast<std::size_t>(std::rand() % static_cast<int>(directions.size()))];
+    std::srand(9001);
+    const Vec2 pickedDirection = AnimationMotionLogic::pickDirection(directions);
+    if (!near(pickedDirection.x, expectedDirection.x) || !near(pickedDirection.y, expectedDirection.y))
+        return false;
+
+    Rect rect;
+    rect.setPositionSize({0.f, 0.f}, {10.f, 10.f});
+    PhysicComponent comp(rect);
+    comp.continuousVelocity = {1.f, -2.f};
+    const Vec2 startingContinuous = comp.continuousVelocity;
+
+    AnimationMotionLogic::applyMovementEnter(comp, pickedDirection, false);
+    if (!near(comp.continuousVelocity.x, startingContinuous.x + pickedDirection.x) ||
+        !near(comp.continuousVelocity.y, startingContinuous.y + pickedDirection.y) || comp.applyGravity)
+        return false;
+
+    AnimationMotionLogic::applyMovementExit(comp, pickedDirection);
+    if (!near(comp.continuousVelocity.x, startingContinuous.x) || !near(comp.continuousVelocity.y, startingContinuous.y) ||
+        !comp.applyGravity)
+        return false;
+
+    const Vec2 gravity{0.f, -9.8f};
+    comp.velocity = {0.5f, -0.25f};
+    comp.isGrounded = true;
+    const int sideIndex = AnimationMotionLogic::shouldFaceRight(pickedDirection) ? 1 : 0;
+    AnimationMotionLogic::applyJumpImpulse(comp, pickedDirection, sideIndex, 2.f, 3.f, gravity);
+
+    const float sideMultiplier = static_cast<float>((sideIndex * 2) - 1);
+    const Vec2 expectedVelocity = {0.5f + pickedDirection.x * sideMultiplier * 3.f - gravity.x * 2.f,
+                                   -0.25f + pickedDirection.y * sideMultiplier * 3.f - gravity.y * 2.f};
+    if (!near(comp.velocity.x, expectedVelocity.x) || !near(comp.velocity.y, expectedVelocity.y) || comp.isGrounded)
+        return false;
+
+    return true;
+}
+
 bool test_cursor_delta_pruning()
 {
     GameData data{};
@@ -874,6 +917,7 @@ int main()
         {"state_machine_and_transition_helpers", test_state_machine_and_transition_helpers},
         {"physics_motion_drag_and_collision_states", test_physics_motion_drag_and_collision_states},
         {"pause_resume_and_release_velocity", test_pause_resume_and_release_velocity},
+        {"seeded_walk_and_jump_golden_outcomes", test_seeded_walk_and_jump_golden_outcomes},
         {"cursor_delta_pruning", test_cursor_delta_pruning},
     };
 

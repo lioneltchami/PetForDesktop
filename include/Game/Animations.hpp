@@ -5,6 +5,7 @@
 #include "Engine/SpriteSheet.hpp"
 #include "Engine/Vector2.hpp"
 #include "Engine/Utilities.hpp"
+#include "Game/AnimationMotionLogic.hpp"
 #include "Game/GameData.hpp"
 
 class AnimationNode : public StateMachine::Node
