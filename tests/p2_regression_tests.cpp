@@ -1,7 +1,32 @@
 #include "Engine/Monitors.hpp"
 #include "Engine/Platform/IWindowEnumerator.hpp"
+#include "Engine/MonitorTopologyCache.hpp"
 #include "Engine/Settings.hpp"
 #include "Engine/Updater.hpp"
+
+class Window;
+class Framebuffer;
+class Shader;
+class Texture;
+class ScreenSpaceQuad;
+class InteractionSystem;
+class WorldSamplingSubsystem;
+class ContextualMenu;
+class SettingMenu;
+class UpdateMenu;
+class Pet;
+
+class Window{};
+class Framebuffer{};
+class Shader{};
+class Texture{};
+class ScreenSpaceQuad{};
+class InteractionSystem{};
+class WorldSamplingSubsystem{};
+class ContextualMenu{};
+class SettingMenu{};
+class UpdateMenu{};
+class Pet{};
 
 #include "yaml-cpp/yaml.h"
 
@@ -19,6 +44,7 @@ struct FakeMonitorSpec
 {
     Vec2i pixelPosition = Vec2i::zero();
     Vec2i pixelSize     = Vec2i::zero();
+    Vec2i physicalSize  = Vec2i::zero();
     Vec2  contentScale  = Vec2::one();
 };
 
@@ -176,8 +202,10 @@ public:
 
     Vec2i getMonitorPhysicalSize(int index) const override
     {
-        (void)index;
-        return Vec2i::zero();
+        if (index < 0 || index >= static_cast<int>(m_monitors.size()))
+            return Vec2i::zero();
+
+        return m_monitors[index].physicalSize;
     }
 };
 
@@ -189,9 +217,9 @@ bool near(float lhs, float rhs, float eps = 1e-4f)
 bool test_monitor_scaling_transform()
 {
     auto monitorEnumerator = std::make_unique<FakeWindowEnumerator>();
-    monitorEnumerator->addMonitor({{0, 0}, {1920, 1080}, {1.f, 1.f}});      // 100%
-    monitorEnumerator->addMonitor({{1920, 0}, {1920, 1080}, {1.25f, 1.25f}}); // 125%
-    monitorEnumerator->addMonitor({{3840, -1200}, {1536, 1536}, {1.5f, 1.5f}}); // 150%
+    monitorEnumerator->addMonitor({{0, 0}, {1920, 1080}, {400, 225}, {1.f, 1.f}});      // 100%
+    monitorEnumerator->addMonitor({{1920, 0}, {1920, 1080}, {384, 216}, {1.25f, 1.25f}}); // 125%
+    monitorEnumerator->addMonitor({{3840, -1200}, {1536, 1536}, {307, 173}, {1.5f, 1.5f}}); // 150%
 
     Monitors monitors(std::move(monitorEnumerator));
 
@@ -218,9 +246,22 @@ bool test_monitor_scaling_transform()
         return false;
 
     // Logical index nearest fallback for mixed layout and gap fallback
-    if (monitors.getMonitorIndexForLogicalPoint(Vec2i{1960, 100}) != 0)
+    if (monitors.getMainMonitorIndex(Vec2i{1960, 100}) != 0)
         return false;
-    if (monitors.getMonitorIndexForLogicalPoint(Vec2i{2050, 100}) != 1)
+    if (monitors.getMainMonitorIndex(Vec2i{2050, 100}) != 1)
+        return false;
+
+    // Per monitor metric check (pixel-per-meter)
+    Vec2 ppm1 = monitors.getPixelPerMeterForLogicalPoint({100.f, 100.f});
+    if (!near(ppm1.x, 4800.f, 1.f) || !near(ppm1.y, 4800.f, 1.f))
+        return false;
+
+    Vec2 ppm2 = monitors.getPixelPerMeterForLogicalPoint({1600.f, 100.f});
+    if (!near(ppm2.x, 5000.f, 1.f) || !near(ppm2.y, 5000.f, 1.f))
+        return false;
+
+    Vec2 ppm3 = monitors.getPixelPerMeterForLogicalPoint({2600.f, -700.f});
+    if (!near(ppm3.x, 5000.f, 1.f) || !near(ppm3.y, 5000.f, 1.f))
         return false;
 
     return true;
@@ -229,8 +270,8 @@ bool test_monitor_scaling_transform()
 bool test_monitor_fallback_and_selection()
 {
     auto monitorEnumerator = std::make_unique<FakeWindowEnumerator>();
-    monitorEnumerator->addMonitor({{0, 0}, {1920, 1080}, {1.f, 1.f}});
-    monitorEnumerator->addMonitor({{3000, 0}, {1600, 1200}, {1.5f, 1.5f}});
+    monitorEnumerator->addMonitor({{0, 0}, {1920, 1080}, {400, 225}, {1.f, 1.f}});
+    monitorEnumerator->addMonitor({{3000, 0}, {1600, 1200}, {256, 144}, {1.5f, 1.5f}});
     monitorEnumerator->setPrimaryMonitor(1);
 
     Monitors monitors(std::move(monitorEnumerator));
@@ -242,10 +283,17 @@ bool test_monitor_fallback_and_selection()
     if (monitorPos.x != 2000 || monitorPos.y != 0 || monitorSize.x != 1067 || monitorSize.y != 800)
         return false;
 
-    if (monitors.getMonitorIndexForLogicalPoint(Vec2i{1500, 200}) != 0)
+    if (monitors.getMainMonitorIndex(Vec2i{1500, 200}) != 0)
         return false;
 
-    if (monitors.getMonitorIndexForLogicalPoint(Vec2i{2500, 200}) != 1)
+    if (monitors.getMainMonitorIndex(Vec2i{2500, 200}) != 1)
+        return false;
+
+    if (monitors.getPrimaryMonitorIndex() != 1)
+        return false;
+
+    Vec2i physicalSize = monitors.getMonitorPhysicalSize(1);
+    if (physicalSize.x != 256 || physicalSize.y != 144)
         return false;
 
     return true;
@@ -295,7 +343,12 @@ bool test_update_metadata_validation()
     std::string error;
 
     // Good manifest-like payload
-    if (!Updater::parseManifestForTest("{\"package\":\"https://example.com/app-v1.exe\",\"checksum\":\"abcdef\"}", metadata))
+    if (!Updater::parseManifestForTest("{\"package\":\"https://github.com/example/app-v1.exe\",\"checksum\":\"abcdef\"}", metadata))
+        return false;
+
+    // Host allowlist should reject unknown hosts
+    if (Updater::parseManifestForTest("{\"package\":\"https://not-trusted.example.com/app-v1.exe\",\"checksum\":\"a\"}",
+                                       metadata))
         return false;
 
     // Invalid checksum length
@@ -306,7 +359,7 @@ bool test_update_metadata_validation()
     metadata.checksum = std::string(64, 'a');
     metadata.checksumAlgorithm = "sha256";
     metadata.packageName = "app-v1.exe";
-    metadata.packageUrl = "https://example.com/app-v1.exe";
+    metadata.packageUrl = "https://github.com/example/app-v1.exe";
     if (!Updater::validateMetadataEnvelopeForTest(metadata, error))
         return false;
 

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <array>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -27,6 +28,7 @@ constexpr std::size_t kMaxDownloadBytes = 1024u * 1024u * 300u; // 300MB hard ca
 constexpr std::size_t kMaxMetadataBytes = 1024u * 1024u; // 1MB metadata payload cap
 constexpr std::size_t kMaxReleaseNotesBytes = 1024u * 1024u; // 1MB
 constexpr std::size_t kMaxAssetUrlLength = 4096;
+constexpr std::array<const char*, 2> kTrustedUpdateHosts = {"github.com", "api.github.com"};
 
 struct Version
 {
@@ -217,6 +219,53 @@ bool isValidSignatureFormat(const std::string& signature)
     return true;
 }
 
+std::string toLowerAscii(std::string value)
+{
+    for (auto& c : value)
+    {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+
+    return value;
+}
+
+bool isTrustedHost(const std::string& host)
+{
+    if (host.empty())
+        return false;
+
+    const std::string hostLower = toLowerAscii(host);
+    for (const auto trustedHost : kTrustedUpdateHosts)
+    {
+        if (hostLower == trustedHost)
+            return true;
+    }
+
+    return false;
+}
+
+bool extractUrlHost(const std::string& url, std::string& host)
+{
+    const auto schemePos = url.find("://");
+    if (schemePos == std::string::npos)
+        return false;
+
+    std::string authority = url.substr(schemePos + 3);
+
+    const auto pathPos = authority.find_first_of("/?#");
+    if (pathPos != std::string::npos)
+        authority = authority.substr(0, pathPos);
+
+    const auto atPos = authority.rfind('@');
+    if (atPos != std::string::npos)
+        authority = authority.substr(atPos + 1);
+
+    const auto colonPos = authority.find(':');
+    host = (colonPos == std::string::npos) ? authority : authority.substr(0, colonPos);
+
+    return !host.empty();
+}
+
 std::string extractFilenameFromUrl(const std::string& url)
 {
     std::string input = url;
@@ -245,6 +294,10 @@ bool isHttpsUrl(const std::string& value)
 
     if (value.find('\n') != std::string::npos || value.find('\r') != std::string::npos ||
         value.find('\t') != std::string::npos)
+        return false;
+
+    std::string host;
+    if (!extractUrlHost(value, host) || !isTrustedHost(host))
         return false;
 
     return true;
@@ -532,8 +585,20 @@ bool validateMetadataEnvelope(const UpdateMetadata& metadata, std::string& error
         }
 
         if (!isValidSignatureFormat(metadata.signature))
+            {
+                error = "Signed metadata uses unsupported signature format";
+                return false;
+            }
+
+        if (metadata.signature.size() != 64)
         {
-            error = "Signed metadata uses unsupported signature format";
+            error = "Unsupported signature length";
+            return false;
+        }
+
+        if (!isValidHexDigest(metadata.signature))
+        {
+            error = "Signature contains non-hex characters";
             return false;
         }
     }
@@ -550,25 +615,28 @@ bool verifySignedMetadata(const UpdateMetadata& metadata, std::string& error)
     {
         if (metadata.signaturePublicKey.empty() && metadata.checksum.empty())
         {
-            error = "SHA256 metadata signature requires either checksum or public key";
+            error = "SHA256 metadata signature requires checksum";
             return false;
         }
 
-        if (!metadata.checksum.empty())
+        if (metadata.checksum.empty())
         {
-            std::string signature = metadata.signature;
-            for (auto& c : signature)
-                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            error = "SHA256 signature requires checksum to validate";
+            return false;
+        }
 
-            std::string expected = metadata.checksum;
-            for (auto& c : expected)
-                c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        std::string signature = metadata.signature;
+        for (auto& c : signature)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
 
-            if (signature != expected)
-            {
-                error = "SHA256 signature does not match checksum metadata";
-                return false;
-            }
+        std::string expected = metadata.checksum;
+        for (auto& c : expected)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+        if (signature != expected)
+        {
+            error = "SHA256 signature does not match checksum metadata";
+            return false;
         }
 
         return true;
@@ -952,13 +1020,22 @@ bool Updater::downloadAndStageUpdate(const UpdateMetadata& metadata, std::filesy
     const std::string fileName = metadata.packageName.empty() ? std::string("PetForDesktop-Update.bin") : metadata.packageName;
     const auto        safeName = sanitizeFileName(fileName);
     const std::filesystem::path stagedPath = stageDir / safeName;
-    const std::filesystem::path stagedPartPath = stagedPath.string() + ".part";
 
-    std::error_code cleanupError;
-    std::filesystem::remove(stagedPartPath, cleanupError);
+    const auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::system_clock::now().time_since_epoch())
+                           .count();
+    const std::filesystem::path stagedPartPath = stageDir / (safeName + ".part." + std::to_string(nowMs));
+
+    auto removeQuietly = [&](const std::filesystem::path& path) {
+        std::error_code cleanupError;
+        std::filesystem::remove(path, cleanupError);
+    };
 
     if (!downloadToFile(metadata.packageUrl, stagedPartPath, error))
+    {
+        removeQuietly(stagedPartPath);
         return false;
+    }
 
     if (!metadata.packageUrl.empty())
     {
@@ -966,7 +1043,7 @@ bool Updater::downloadAndStageUpdate(const UpdateMetadata& metadata, std::filesy
         const auto fileSize = std::filesystem::file_size(stagedPartPath, fileSizeError);
         if (!fileSizeError && metadata.packageSize > 0 && fileSize != metadata.packageSize)
         {
-            std::filesystem::remove(stagedPartPath, cleanupError);
+            removeQuietly(stagedPartPath);
             error = "Downloaded package size mismatch";
             return false;
         }
@@ -979,7 +1056,7 @@ bool Updater::downloadAndStageUpdate(const UpdateMetadata& metadata, std::filesy
     std::filesystem::rename(stagedPartPath, stagedPath, renameError);
     if (renameError)
     {
-        std::filesystem::remove(stagedPartPath, cleanupError);
+        removeQuietly(stagedPartPath);
         error = renameError.message();
         return false;
     }

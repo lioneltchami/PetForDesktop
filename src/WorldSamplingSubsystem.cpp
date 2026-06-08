@@ -307,3 +307,25 @@ Vec2 WorldSamplingSubsystem::logicalToPhysical(const Vec2& logicalPosition, cons
 
     return logicalPosition * defaultScale;
 }
+
+Vec2 WorldSamplingSubsystem::getPixelPerMeterForPosition(const Vec2& logicalPosition, const Vec2 defaultPixelPerMeter) const
+{
+    if (!m_monitorTopology)
+        return defaultPixelPerMeter;
+
+    const auto monitor = m_monitorTopology->findMonitorForLogicalPoint(logicalPosition);
+    if (monitor.has_value() && monitor->pixelPerMeter.x > 0.f && monitor->pixelPerMeter.y > 0.f &&
+        std::isfinite(monitor->pixelPerMeter.x) && std::isfinite(monitor->pixelPerMeter.y))
+    {
+        return monitor->pixelPerMeter;
+    }
+
+    const auto snapshot = getMonitorTopologySnapshot();
+    if (!snapshot.empty() && snapshot.front().pixelPerMeter.x > 0.f && snapshot.front().pixelPerMeter.y > 0.f &&
+        std::isfinite(snapshot.front().pixelPerMeter.x) && std::isfinite(snapshot.front().pixelPerMeter.y))
+    {
+        return snapshot.front().pixelPerMeter;
+    }
+
+    return defaultPixelPerMeter;
+}

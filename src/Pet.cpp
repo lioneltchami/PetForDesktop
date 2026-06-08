@@ -5,6 +5,9 @@
 #include "Game/AnimationTransitions.hpp"
 #include "Game/Animations.hpp"
 #include "Game/ContextualMenu.hpp"
+#include "Engine/WorldSamplingSubsystem.hpp"
+
+#include <cmath>
 
 #ifdef USE_OPENGL_API
 #include "Engine/Graphics/ScreenSpaceQuadOGL.hpp"
@@ -360,8 +363,23 @@ void Pet::update(double deltaTime)
     dialoguePopup.update(deltaTime);
 
     if (interactionComponent.isLeftRelease)
+    {
+        Vec2 localPixelPerMeter = datas.pixelPerMeter;
+        if (datas.worldSampling)
+        {
+            const Vec2 petProbePosition = getPosition() + (getSize() * 0.5f);
+            localPixelPerMeter = datas.worldSampling->getPixelPerMeterForPosition(petProbePosition, localPixelPerMeter);
+        }
+
+        if (localPixelPerMeter.x <= 0.f || localPixelPerMeter.y <= 0.f ||
+            !std::isfinite(localPixelPerMeter.x) || !std::isfinite(localPixelPerMeter.y))
+        {
+            localPixelPerMeter = datas.pixelPerMeter;
+        }
+
         physicComponent.velocity =
-            datas.deltaCursorAcc / datas.coyoteTimeCursorPos / datas.pixelPerMeter * datas.releaseImpulse;
+            datas.deltaCursorAcc / datas.coyoteTimeCursorPos / localPixelPerMeter * datas.releaseImpulse;
+    }
 
     if (interactionComponent.isLeftPressOver)
         physicComponent.isGrounded = false;

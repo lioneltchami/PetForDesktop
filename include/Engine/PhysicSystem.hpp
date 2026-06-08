@@ -146,6 +146,18 @@ public:
 
     void update(PhysicComponent& comp, InteractionComponent& interactionComp, double deltaTime)
     {
+        Vec2 localPixelPerMeter = data.pixelPerMeter;
+        if (data.worldSampling)
+        {
+            const Vec2 motionProbePoint = comp.getRect().getPosition() + comp.getRect().getSize() * 0.5f;
+            localPixelPerMeter = data.worldSampling->getPixelPerMeterForPosition(motionProbePoint, localPixelPerMeter);
+            if (localPixelPerMeter.x <= 0.f || localPixelPerMeter.y <= 0.f ||
+                !std::isfinite(localPixelPerMeter.x) || !std::isfinite(localPixelPerMeter.y))
+            {
+                localPixelPerMeter = data.pixelPerMeter;
+            }
+        }
+
         // Apply gravity if not selected
         if (interactionComp.isLeftSelected)
         {
@@ -167,7 +179,7 @@ public:
             const Vec2 prevWinPos = comp.getRect().getPosition();
             // Pos = PrevPos + V * Time
             const Vec2 newWinPos = comp.getRect().getPosition() + ((comp.continuousVelocity + comp.velocity) * (1.f - data.friction) *
-                                                  data.pixelPerMeter * (float)deltaTime);
+                                                  localPixelPerMeter * (float)deltaTime);
             
             const Vec2 prevToNewWinPos = newWinPos - prevWinPos;
             const float sqrDistMovement    = prevToNewWinPos.sqrLength();

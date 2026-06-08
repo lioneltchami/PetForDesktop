@@ -94,6 +94,7 @@ void MonitorTopologyCache::sampleNow()
         MonitorTopologyItem topology;
         m_monitors->getMonitorPixelPosition(i, topology.pixelPosition);
         m_monitors->getMonitorPixelSize(i, topology.pixelSize);
+        topology.physicalSize = m_monitors->getMonitorPhysicalSize(i);
         m_monitors->getMonitorScale(i, topology.contentScale);
 
         const float safeScaleX = std::max(topology.contentScale.x, 0.0001f);
@@ -115,6 +116,24 @@ void MonitorTopologyCache::sampleNow()
 
         if (topology.contentScale.x <= 0.f || topology.contentScale.y <= 0.f)
             topology.contentScale = Vec2::one();
+
+        const float safePhysicalWidthMM = static_cast<float>(topology.physicalSize.x);
+        const float safePhysicalHeightMM = static_cast<float>(topology.physicalSize.y);
+        if (safePhysicalWidthMM > 0.f && safePhysicalHeightMM > 0.f)
+        {
+            topology.pixelPerMeter = {static_cast<float>(topology.pixelSize.x) / (safePhysicalWidthMM * 0.001f),
+                                     static_cast<float>(topology.pixelSize.y) / (safePhysicalHeightMM * 0.001f)};
+
+            if (topology.pixelPerMeter.x <= 0.f || !std::isfinite(topology.pixelPerMeter.x) ||
+                topology.pixelPerMeter.y <= 0.f || !std::isfinite(topology.pixelPerMeter.y))
+            {
+                topology.pixelPerMeter = {3779.527f * topology.contentScale.x, 3779.527f * topology.contentScale.y};
+            }
+        }
+        else
+        {
+            topology.pixelPerMeter = {3779.527f * topology.contentScale.x, 3779.527f * topology.contentScale.y};
+        }
 
         m_monitorsSnapshot.emplace_back(topology);
     }

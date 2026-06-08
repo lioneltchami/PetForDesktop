@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <errno.h>
@@ -48,6 +49,7 @@ constexpr float kMinCollisionRatio = 0.f;
 constexpr float kMaxCollisionRatio = 1.f;
 constexpr float kMinPositiveFloat = 0.0001f;
 constexpr int kMinFootBasement = 1;
+constexpr std::size_t kMaxThemeNameLength = 64;
 
 constexpr std::array<std::string_view, 9> kAllowedSections = {"Game", "Physic", "GamePlay", "Window", "Style",
                                                            "Accessibility", "Debug", "Graphics", "Display"};
@@ -71,6 +73,22 @@ constexpr std::array<std::string_view, 5> kWindowSectionKeys = {"FullScreenWindo
 constexpr std::array<std::string_view, 1> kStyleSectionKeys = {"Theme"};
 constexpr std::array<std::string_view, 2> kAccessibilitySectionKeys = {"Scale", "TextScale"};
 constexpr std::array<std::string_view, 1> kDebugSectionKeys = {"ShowEdgeDetection"};
+
+bool isReasonableThemeName(const std::string& value)
+{
+    if (value.empty() || value.size() > kMaxThemeNameLength)
+        return false;
+
+    for (char c : value)
+    {
+        if (std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == ' ')
+            continue;
+
+        return false;
+    }
+
+    return true;
+}
 
 inline bool isAllowedSection(std::string_view sectionName)
 {
@@ -430,7 +448,13 @@ bool Setting::importFile(const char* src, GameData& data, ValidationReport& repo
 
         std::string theme;
         if (readScalarWithReport(section, "Style", "Theme", theme, report, srcPath))
-            data.styleName = theme;
+        {
+            if (!isReasonableThemeName(theme))
+                addValidationIssue(report, srcPath, "Style", "Theme",
+                                 "Invalid theme name; using default theme", false);
+            else
+                data.styleName = theme;
+        }
     }
 
     if (getSection(root, "Accessibility", section))

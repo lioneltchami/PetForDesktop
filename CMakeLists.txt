@@ -153,16 +153,21 @@ enable_testing()
 
 add_executable(pet-p2-tests
     tests/p2_regression_tests.cpp
+    src/FileExplorer.cpp
+    src/PlatformServices.cpp
     src/Settings.cpp
+    src/UpdateMenu.cpp
     src/MonitorTopologyCache.cpp
     src/Updater.cpp
 )
 
 target_include_directories(pet-p2-tests PRIVATE ${ABS_INCLUDE_DIR} ${ABS_SRC_DIR})
+target_include_directories(pet-p2-tests PRIVATE ${ABS_DEPS_DIR}/imgui/imgui)
 
-target_link_libraries(pet-p2-tests PRIVATE Boxer yaml-cpp cpr)
+target_link_libraries(pet-p2-tests PRIVATE Boxer yaml-cpp cpr glfw)
 
 target_compile_definitions(pet-p2-tests PRIVATE PROJECT_NAME="${PROJECT_NAME}")
 target_compile_definitions(pet-p2-tests PRIVATE PROJECT_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(pet-p2-tests PRIVATE RESOURCE_PATH="${REL_RESOURCES_DIR}")
 
 add_test(NAME pet-p2-regression COMMAND pet-p2-tests)

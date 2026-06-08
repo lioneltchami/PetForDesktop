@@ -16,6 +16,8 @@ struct MonitorTopologyItem
     Vec2i size;          // Logical desktop size
     Vec2i pixelPosition; // Physical pixel coordinates
     Vec2i pixelSize;     // Physical pixel size
+    Vec2  pixelPerMeter = {3779.527f, 3779.527f}; // 96 DPI fallback
+    Vec2i physicalSize;   // Physical monitor size in mm
     Vec2  contentScale = Vec2::one();
 
     bool containsLogicalPoint(const Vec2& logicalPoint) const
@@ -45,6 +47,11 @@ struct MonitorTopologyItem
     bool containsPhysicalPoint(const Vec2& pixelPoint) const
     {
         return containsLogicalPoint(physicalToLogical(pixelPoint));
+    }
+
+    Vec2 getPixelPerMeter() const
+    {
+        return pixelPerMeter;
     }
 };
 

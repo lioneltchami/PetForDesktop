@@ -59,6 +59,7 @@ public:
     void onMonitorTopologyChanged();
 
     std::vector<MonitorTopologyItem> getMonitorTopologySnapshot() const;
+    Vec2 getPixelPerMeterForPosition(const Vec2& logicalPosition, const Vec2 defaultPixelPerMeter = Vec2(3779.527f, 3779.527f)) const;
 
     bool checkSurfaceCollision(PhysicComponent& comp, Vec2 prevToNewWinPos, Vec2& newPos, GameData& data);
 };

@@ -120,7 +120,8 @@ public:
         Vec2i monitorSize;
         Vec2i monitorSizeMM;
         datas.monitors.getMainMonitorWorkingArea(monitorPos, monitorSize);
-        monitorSizeMM = datas.monitors.getMainMonitorPhysicalSize();
+        const int primaryMonitor = datas.monitors.getPrimaryMonitorIndex();
+        monitorSizeMM = primaryMonitor >= 0 ? datas.monitors.getMonitorPhysicalSize(primaryMonitor) : Vec2i::zero();
 
         if (monitorSize.sqrLength() == 0)
             monitorSize = datas.monitors.getMonitorsSize();
@@ -140,7 +141,7 @@ public:
             datas.window->setPosition(centeredPos);
         }
 
-        // Evaluate pixel distance based on dpi and monitor size
+        // Evaluate pixel distance based on DPI and monitor size.
         if (monitorSizeMM.x > 0 && monitorSizeMM.y > 0)
         {
             datas.pixelPerMeter = {(float)monitorSize.x / (monitorSizeMM.x * 0.001f),
@@ -148,7 +149,8 @@ public:
         }
         else
         {
-            datas.pixelPerMeter = Vec2{96.f / 0.0254f, 96.f / 0.0254f};
+            const Vec2 monitorProbe = monitorPos + (monitorSize * 0.5f);
+            datas.pixelPerMeter = datas.monitors.getPixelPerMeterForLogicalPoint(monitorProbe, Vec2{3779.527f, 3779.527f});
         }
 
         datas.interactionSystem = std::make_unique<InteractionSystem>();

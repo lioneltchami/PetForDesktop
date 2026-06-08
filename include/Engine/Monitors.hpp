@@ -20,6 +20,8 @@ public:
         Vec2i logicalSize     = Vec2i::zero();
         Vec2i pixelPosition  = Vec2i::zero();
         Vec2i pixelSize      = Vec2i::zero();
+        Vec2i physicalSize   = Vec2i::zero();
+        Vec2  pixelPerMeter  = {3779.527f, 3779.527f};
         Vec2  contentScale   = Vec2::one();
 
         Vec2 logicalToPhysical(const Vec2& logicalPoint) const
@@ -68,6 +70,7 @@ protected:
         m_enumerator->getMonitorPixelPosition(index, transform.pixelPosition);
         m_enumerator->getMonitorPixelSize(index, transform.pixelSize);
         m_enumerator->getMonitorContentScale(index, transform.contentScale);
+        transform.physicalSize = m_enumerator->getMonitorPhysicalSize(index);
         m_enumerator->getMonitorPosition(index, transform.logicalPosition);
         m_enumerator->getMonitorSize(index, transform.logicalSize);
 
@@ -78,6 +81,23 @@ protected:
         if (transform.contentScale.x <= 0.f || transform.contentScale.y <= 0.f ||
             !std::isfinite(transform.contentScale.x) || !std::isfinite(transform.contentScale.y))
             transform.contentScale = Vec2::one();
+
+        if (transform.physicalSize.x > 0 && transform.physicalSize.y > 0)
+        {
+            transform.pixelPerMeter = {static_cast<float>(transform.pixelSize.x) /
+                                          (static_cast<float>(transform.physicalSize.x) * 0.001f),
+                                      static_cast<float>(transform.pixelSize.y) /
+                                          (static_cast<float>(transform.physicalSize.y) * 0.001f)};
+            if (transform.pixelPerMeter.x <= 0.f || !std::isfinite(transform.pixelPerMeter.x) ||
+                transform.pixelPerMeter.y <= 0.f || !std::isfinite(transform.pixelPerMeter.y))
+            {
+                transform.pixelPerMeter = {3779.527f * transform.contentScale.x, 3779.527f * transform.contentScale.y};
+            }
+        }
+        else
+        {
+            transform.pixelPerMeter = {3779.527f * transform.contentScale.x, 3779.527f * transform.contentScale.y};
+        }
 
         return true;
     }
@@ -139,20 +159,6 @@ protected:
         return bestTransform;
     }
 
-    int getPrimaryMonitorIndex() const
-    {
-        std::lock_guard lock{m_mutex};
-        if (!m_enumerator)
-            return -1;
-
-        const int primaryMonitor = m_enumerator->getPrimaryMonitorIndex();
-        if (primaryMonitor >= 0)
-            return primaryMonitor;
-
-        const int monitorCount = m_enumerator->getMonitorsCount();
-        return monitorCount > 0 ? 0 : -1;
-    }
-
     int findMonitorIndexForLogicalPoint(const Vec2i& logicalPoint) const
     {
         std::lock_guard lock{m_mutex};
@@ -190,11 +196,6 @@ protected:
         }
 
         return bestIndex;
-    }
-
-    int getMainMonitorIndex() const
-    {
-        return getPrimaryMonitorIndex();
     }
 
 public:
@@ -258,6 +259,25 @@ public:
         return findMonitorIndexForLogicalPoint(referencePosition);
     }
 
+    int getPrimaryMonitorIndex() const
+    {
+        std::lock_guard lock{m_mutex};
+        if (!m_enumerator)
+            return -1;
+
+        const int primaryMonitor = m_enumerator->getPrimaryMonitorIndex();
+        if (primaryMonitor >= 0)
+            return primaryMonitor;
+
+        const int monitorCount = m_enumerator->getMonitorsCount();
+        return monitorCount > 0 ? 0 : -1;
+    }
+
+    int getMainMonitorIndex() const
+    {
+        return getPrimaryMonitorIndex();
+    }
+
     std::optional<MonitorTransform> getMonitorTransformForLogicalPoint(Vec2 logicalPoint) const
     {
         std::lock_guard lock{m_mutex};
@@ -286,6 +306,33 @@ public:
             return pixelPoint * (Vec2{1.f / std::max(fallbackScale.x, 0.0001f), 1.f / std::max(fallbackScale.y, 0.0001f)});
 
         return transform->physicalToLogical(pixelPoint);
+    }
+
+    Vec2 getPixelPerMeterForLogicalPoint(Vec2 logicalPoint, Vec2 fallbackPixelPerMeter = {3779.527f, 3779.527f}) const
+    {
+        const auto transform = getMonitorTransformForLogicalPoint(logicalPoint);
+        if (!transform)
+            return fallbackPixelPerMeter;
+
+        return transform->pixelPerMeter;
+    }
+
+    Vec2 getPixelPerMeterForPhysicalPoint(Vec2 pixelPoint, Vec2 fallbackPixelPerMeter = {3779.527f, 3779.527f}) const
+    {
+        const auto transform = getMonitorTransformForPhysicalPoint(pixelPoint);
+        if (!transform)
+            return fallbackPixelPerMeter;
+
+        return transform->pixelPerMeter;
+    }
+
+    Vec2 getPixelPerMeterForMonitor(int index, Vec2 fallbackPixelPerMeter = {3779.527f, 3779.527f}) const
+    {
+        MonitorTransform transform;
+        if (!buildMonitorTransform(index, transform))
+            return fallbackPixelPerMeter;
+
+        return transform.pixelPerMeter;
     }
 
     Vec2i getMainMonitorPhysicalSize() const
