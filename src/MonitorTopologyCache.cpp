@@ -5,9 +5,19 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 
 namespace
 {
+float pointToRectDistanceSq(const Vec2& point, const Vec2& minPoint, const Vec2& maxPoint)
+{
+    const float clampedX = std::min(std::max(point.x, minPoint.x), maxPoint.x);
+    const float clampedY = std::min(std::max(point.y, minPoint.y), maxPoint.y);
+    const float dx = point.x - clampedX;
+    const float dy = point.y - clampedY;
+    return dx * dx + dy * dy;
+}
+
 double nowSeconds()
 {
     using Clock = std::chrono::steady_clock;
@@ -140,13 +150,26 @@ std::optional<MonitorTopologyItem> MonitorTopologyCache::findMonitorForLogicalPo
     if (m_monitorsSnapshot.empty())
         return std::nullopt;
 
+    std::optional<MonitorTopologyItem> closestMonitor;
+    float                               bestDistance = std::numeric_limits<float>::infinity();
+
     for (const auto& monitor : m_monitorsSnapshot)
     {
         if (monitor.containsLogicalPoint(logicalPoint))
             return monitor;
+
+        const Vec2 minPoint = {static_cast<float>(monitor.position.x), static_cast<float>(monitor.position.y)};
+        const Vec2 maxPoint =
+            {static_cast<float>(monitor.position.x + monitor.size.x), static_cast<float>(monitor.position.y + monitor.size.y)};
+        const float distance = pointToRectDistanceSq(logicalPoint, minPoint, maxPoint);
+        if (!closestMonitor || distance < bestDistance)
+        {
+            bestDistance  = distance;
+            closestMonitor = monitor;
+        }
     }
 
-    return std::nullopt;
+    return closestMonitor;
 }
 
 std::optional<MonitorTopologyItem> MonitorTopologyCache::findMonitorForPhysicalPoint(const Vec2& pixelPoint) const
@@ -155,11 +178,25 @@ std::optional<MonitorTopologyItem> MonitorTopologyCache::findMonitorForPhysicalP
     if (m_monitorsSnapshot.empty())
         return std::nullopt;
 
+    std::optional<MonitorTopologyItem> closestMonitor;
+    float                               bestDistance = std::numeric_limits<float>::infinity();
+
     for (const auto& monitor : m_monitorsSnapshot)
     {
         if (monitor.containsPhysicalPoint(pixelPoint))
             return monitor;
+
+        const Vec2 minPoint = {static_cast<float>(monitor.pixelPosition.x), static_cast<float>(monitor.pixelPosition.y)};
+        const Vec2 maxPoint =
+            {static_cast<float>(monitor.pixelPosition.x + monitor.pixelSize.x),
+             static_cast<float>(monitor.pixelPosition.y + monitor.pixelSize.y)};
+        const float distance = pointToRectDistanceSq(pixelPoint, minPoint, maxPoint);
+        if (!closestMonitor || distance < bestDistance)
+        {
+            bestDistance  = distance;
+            closestMonitor = monitor;
+        }
     }
 
-    return std::nullopt;
+    return closestMonitor;
 }

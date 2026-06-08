@@ -148,3 +148,21 @@ add_custom_target(copy_assets
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_LIST_DIR}/${REL_RESOURCES_DIR} ${CMAKE_CURRENT_BINARY_DIR}/${REL_RESOURCES_DIR}
 )
 add_dependencies(${PROJECT_NAME} copy_assets)
+
+enable_testing()
+
+add_executable(pet-p2-tests
+    tests/p2_regression_tests.cpp
+    src/Settings.cpp
+    src/MonitorTopologyCache.cpp
+    src/Updater.cpp
+)
+
+target_include_directories(pet-p2-tests PRIVATE ${ABS_INCLUDE_DIR} ${ABS_SRC_DIR})
+
+target_link_libraries(pet-p2-tests PRIVATE Boxer yaml-cpp cpr)
+
+target_compile_definitions(pet-p2-tests PRIVATE PROJECT_NAME="${PROJECT_NAME}")
+target_compile_definitions(pet-p2-tests PRIVATE PROJECT_VERSION="${PROJECT_VERSION}")
+
+add_test(NAME pet-p2-regression COMMAND pet-p2-tests)

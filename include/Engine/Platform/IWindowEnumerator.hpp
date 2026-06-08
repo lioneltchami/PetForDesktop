@@ -13,6 +13,8 @@ public:
 
     virtual int getMonitorsCount() const = 0;
 
+    virtual int getPrimaryMonitorIndex() const = 0;
+
     virtual void getMainMonitorWorkingArea(Vec2i& position, Vec2i& size) const = 0;
 
     virtual Vec2i getMonitorsSize() const = 0;

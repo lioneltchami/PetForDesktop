@@ -10,9 +10,12 @@
 #include <errno.h>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <system_error>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 #include <type_traits>
 
 #ifndef _WIN32
@@ -46,7 +49,7 @@ constexpr float kMaxCollisionRatio = 1.f;
 constexpr float kMinPositiveFloat = 0.0001f;
 constexpr int kMinFootBasement = 1;
 
-constexpr std::array<std::string_view, 8> kAllowedSections = {"Game", "Physic", "GamePlay", "Window", "Style",
+constexpr std::array<std::string_view, 9> kAllowedSections = {"Game", "Physic", "GamePlay", "Window", "Style",
                                                            "Accessibility", "Debug", "Graphics", "Display"};
 
 constexpr std::array<std::string_view, 2> kGameSectionKeys = {"FPS", "RandomSeed"};
@@ -72,6 +75,23 @@ constexpr std::array<std::string_view, 1> kDebugSectionKeys = {"ShowEdgeDetectio
 inline bool isAllowedSection(std::string_view sectionName)
 {
     return std::find(kAllowedSections.begin(), kAllowedSections.end(), sectionName) != kAllowedSections.end();
+}
+
+void addValidationIssue(Setting::ValidationReport& report, const std::string& filePath, const std::string& section,
+                       const std::string& field, const std::string& message, bool error)
+{
+    Setting::ValidationIssue issue{
+        .filePath = filePath, .section = section, .field = field, .message = message, .severity = error ? "error" : "warning"};
+
+    if (error)
+    {
+        report.valid  = false;
+        report.errors.emplace_back(std::move(issue));
+    }
+    else
+    {
+        report.warnings.emplace_back(std::move(issue));
+    }
 }
 
 template <typename T>
@@ -103,7 +123,28 @@ bool readScalar(const YAML::Node& section, const char* key, T& value)
     }
 }
 
-template <typename T, size_t N>
+template <typename T>
+bool readScalarWithReport(const YAML::Node& section, const char* sectionName, const char* key, T& value,
+                         Setting::ValidationReport& report, const std::string& filePath, bool isRequired = false)
+{
+    const YAML::Node entry = section[key];
+    if (!entry)
+    {
+        if (isRequired)
+            addValidationIssue(report, filePath, sectionName, key, "Missing required setting value", true);
+        return false;
+    }
+
+    if (!readScalar(section, key, value))
+    {
+        addValidationIssue(report, filePath, sectionName, key, "Invalid type or malformed value", true);
+        return false;
+    }
+
+    return true;
+}
+
+template <size_t N>
 bool inArray(std::string_view key, const std::array<std::string_view, N>& allowed)
 {
     for (const auto& candidate : allowed)
@@ -116,8 +157,8 @@ bool inArray(std::string_view key, const std::array<std::string_view, N>& allowe
 }
 
 template <size_t N>
-void warnUnknownKeys(const YAML::Node& section, std::string_view sectionName,
-                    const std::array<std::string_view, N>& allowed)
+void warnUnknownKeys(const YAML::Node& section, std::string_view sectionName, const std::string& filePath,
+                    const std::array<std::string_view, N>& allowed, Setting::ValidationReport& report)
 {
     if (!section.IsMap())
         return;
@@ -134,6 +175,7 @@ void warnUnknownKeys(const YAML::Node& section, std::string_view sectionName,
 
         if (!inArray(std::string_view{key}, allowed))
         {
+            addValidationIssue(report, filePath, std::string(sectionName), key, "Unknown key, using defaults", false);
             warning((std::string("Unknown setting key '") + key + "' in section '" + std::string(sectionName) +
                      "', using defaults.")
                         .c_str());
@@ -141,7 +183,7 @@ void warnUnknownKeys(const YAML::Node& section, std::string_view sectionName,
     }
 }
 
-void warnUnknownSections(const YAML::Node& root)
+void warnUnknownSections(const YAML::Node& root, const std::string& filePath, Setting::ValidationReport& report)
 {
     if (root.IsMap())
     {
@@ -152,7 +194,10 @@ void warnUnknownSections(const YAML::Node& root)
 
             const std::string name = item.first.as<std::string>("");
             if (!name.empty() && !isAllowedSection(name))
+            {
+                addValidationIssue(report, filePath, name, std::string(), "Unknown section, ignoring", false);
                 warning((std::string("Unknown settings section '") + name + "', ignoring.").c_str());
+            }
         }
         return;
     }
@@ -171,7 +216,10 @@ void warnUnknownSections(const YAML::Node& root)
 
                 const std::string name = item.first.as<std::string>("");
                 if (!name.empty() && !isAllowedSection(name))
+                {
+                    addValidationIssue(report, filePath, name, std::string(), "Unknown section, ignoring", false);
                     warning((std::string("Unknown settings section '") + name + "', ignoring.").c_str());
+                }
             }
         }
     }
@@ -284,126 +332,148 @@ void applyDefaults(GameData& data)
 }
 }
 
-void Setting::importFile(const char* src, GameData& data)
+bool Setting::importFile(const char* src, GameData& data, ValidationReport& report)
 {
+    report = ValidationReport{};
+    const std::string srcPath = src ? src : "";
+
     applyDefaults(data);
 
     YAML::Node root;
     try
     {
+        if (!src)
+            throw std::runtime_error("Settings source path is null");
         root = YAML::LoadFile(src);
     }
     catch (...)
     {
-        warning(std::string("Could not read setting file: ") + src + ", using defaults");
-        return;
+        addValidationIssue(report, srcPath, std::string(), std::string(), "Unable to read settings file", true);
+        return false;
     }
 
     if (!root.IsMap() && !root.IsSequence())
     {
-        warning(std::string("Invalid setting file format: ") + src + ", using defaults");
-        return;
+        addValidationIssue(report, srcPath, std::string(), std::string(), "Invalid settings file format", true);
+        return false;
     }
 
-    warnUnknownSections(root);
+    warnUnknownSections(root, srcPath, report);
 
     YAML::Node section;
     if (getSection(root, "Game", section))
     {
-        warnUnknownKeys(section, "Game", kGameSectionKeys);
+        warnUnknownKeys(section, "Game", srcPath, kGameSectionKeys, report);
 
-        readScalar(section, "FPS", data.FPS);
-        readScalar(section, "RandomSeed", data.randomSeed);
+        readScalarWithReport(section, "Game", "FPS", data.FPS, report, srcPath);
+        readScalarWithReport(section, "Game", "RandomSeed", data.randomSeed, report, srcPath);
     }
 
     if (getSection(root, "Physic", section))
     {
-        warnUnknownKeys(section, "Physic", kPhysicsSectionKeys);
+        warnUnknownKeys(section, "Physic", srcPath, kPhysicsSectionKeys, report);
 
-        int physicFrameRate;
-        if (readScalar(section, "PhysicFrameRate", physicFrameRate))
-            data.physicFrameRate = physicFrameRate;
-
-        readScalar(section, "Bounciness", data.bounciness);
-        readScalar(section, "GravityX", data.gravity.x);
-        readScalar(section, "GravityY", data.gravity.y);
-        readScalar(section, "Friction", data.friction);
+        readScalarWithReport(section, "Physic", "PhysicFrameRate", data.physicFrameRate, report, srcPath);
+        readScalarWithReport(section, "Physic", "Bounciness", data.bounciness, report, srcPath);
+        readScalarWithReport(section, "Physic", "GravityX", data.gravity.x, report, srcPath);
+        readScalarWithReport(section, "Physic", "GravityY", data.gravity.y, report, srcPath);
+        readScalarWithReport(section, "Physic", "Friction", data.friction, report, srcPath);
+        readScalarWithReport(section, "Physic", "CollisionPixelRatioStopMovement", data.collisionPixelRatioStopMovement, report,
+                             srcPath);
+        readScalarWithReport(section, "Physic", "IsGroundedDetection", data.isGroundedDetection, report, srcPath);
+        readScalarWithReport(section, "Physic", "InputReleaseImpulse", data.releaseImpulse, report, srcPath);
 
         float maxVelocity = 0.f;
-        if (readScalar(section, "ContinuousCollisionMaxVelocity", maxVelocity))
+        if (readScalarWithReport(section, "Physic", "ContinuousCollisionMaxVelocity", maxVelocity, report, srcPath))
             data.continuousCollisionMaxSqrVelocity = maxVelocity;
 
-        int basementWidth;
-        if (readScalar(section, "FootBasementWidth", basementWidth))
+        int basementWidth = data.footBasementWidth;
+        if (readScalarWithReport(section, "Physic", "FootBasementWidth", basementWidth, report, srcPath))
             data.footBasementWidth = basementWidth;
 
-        int basementHeight;
-        if (readScalar(section, "FootBasementHeight", basementHeight))
+        int basementHeight = data.footBasementHeight;
+        if (readScalarWithReport(section, "Physic", "FootBasementHeight", basementHeight, report, srcPath))
             data.footBasementHeight = basementHeight;
-
-        readScalar(section, "CollisionPixelRatioStopMovement", data.collisionPixelRatioStopMovement);
-        readScalar(section, "IsGroundedDetection", data.isGroundedDetection);
-        readScalar(section, "InputReleaseImpulse", data.releaseImpulse);
     }
 
     if (getSection(root, "GamePlay", section))
     {
-        warnUnknownKeys(section, "GamePlay", kGamePlaySectionKeys);
+        warnUnknownKeys(section, "GamePlay", srcPath, kGamePlaySectionKeys, report);
 
-        readScalar(section, "CoyoteTimeCursorMovement", data.coyoteTimeCursorPos);
+        readScalarWithReport(section, "GamePlay", "CoyoteTimeCursorMovement", data.coyoteTimeCursorPos, report, srcPath);
     }
 
     if (getSection(root, "Window", section))
     {
-        warnUnknownKeys(section, "Window", kWindowSectionKeys);
+        warnUnknownKeys(section, "Window", srcPath, kWindowSectionKeys, report);
 
         bool value = false;
-        if (readScalar(section, "FullScreenWindow", value))
+        if (readScalarWithReport(section, "Window", "FullScreenWindow", value, report, srcPath))
             data.fullScreenWindow = value;
 
-        if (readScalar(section, "ShowWindow", value))
+        if (readScalarWithReport(section, "Window", "ShowWindow", value, report, srcPath))
             data.showWindow = value;
 
-        if (readScalar(section, "ShowFrameBufferBackground", value))
+        if (readScalarWithReport(section, "Window", "ShowFrameBufferBackground", value, report, srcPath))
             data.showFrameBufferBackground = value;
 
-        if (readScalar(section, "UseForwardWindow", value))
+        if (readScalarWithReport(section, "Window", "UseForwardWindow", value, report, srcPath))
             data.useForwardWindow = value;
 
-        if (readScalar(section, "UseMousePassThoughWindow", value))
+        if (readScalarWithReport(section, "Window", "UseMousePassThoughWindow", value, report, srcPath))
             data.useMousePassThoughWindow = value;
     }
 
     if (getSection(root, "Style", section))
     {
-        warnUnknownKeys(section, "Style", kStyleSectionKeys);
+        warnUnknownKeys(section, "Style", srcPath, kStyleSectionKeys, report);
 
         std::string theme;
-        if (readScalar(section, "Theme", theme))
+        if (readScalarWithReport(section, "Style", "Theme", theme, report, srcPath))
             data.styleName = theme;
     }
 
     if (getSection(root, "Accessibility", section))
     {
-        warnUnknownKeys(section, "Accessibility", kAccessibilitySectionKeys);
+        warnUnknownKeys(section, "Accessibility", srcPath, kAccessibilitySectionKeys, report);
 
-        int scale;
-        if (readScalar(section, "Scale", scale))
+        int scale = data.scale;
+        if (readScalarWithReport(section, "Accessibility", "Scale", scale, report, srcPath))
             data.scale = scale;
 
-        readScalar(section, "TextScale", data.textScale);
+        readScalarWithReport(section, "Accessibility", "TextScale", data.textScale, report, srcPath);
     }
 
     if (getSection(root, "Debug", section))
     {
-        warnUnknownKeys(section, "Debug", kDebugSectionKeys);
+        warnUnknownKeys(section, "Debug", srcPath, kDebugSectionKeys, report);
 
         bool debugValue = false;
-        if (readScalar(section, "ShowEdgeDetection", debugValue))
+        if (readScalarWithReport(section, "Debug", "ShowEdgeDetection", debugValue, report, srcPath))
             data.debugEdgeDetection = debugValue;
     }
 
     Setting::sanitize(data);
+    return report.valid;
+}
+
+void Setting::importFile(const char* src, GameData& data)
+{
+    ValidationReport report;
+    const std::string srcPath = src ? src : "";
+    if (!importFile(src, data, report))
+    {
+        warning(std::string("Invalid setting file: ") + srcPath + ", using defaults where needed");
+        for (const auto& warningItem : report.warnings)
+            warning((warningItem.section + ": " + warningItem.field + ": " + warningItem.message).c_str());
+        for (const auto& errorItem : report.errors)
+            logf("Error in settings (%s): %s\n", errorItem.section.c_str(), (errorItem.section + ": " + errorItem.field + ": " + errorItem.message).c_str());
+    }
+    else if (!report.warnings.empty())
+    {
+        for (const auto& warningItem : report.warnings)
+            warning((warningItem.section + ": " + warningItem.field + ": " + warningItem.message).c_str());
+    }
 }
 
 void Setting::exportFile(const char* dest, GameData& data)

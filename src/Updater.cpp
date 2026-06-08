@@ -350,16 +350,16 @@ bool parseManifestFromText(const std::string& manifestText, UpdateMetadata& meta
     bool hasAny = false;
 
     std::string value;
-        if (parseJsonStringField(manifestText, "package", value) || parseJsonStringField(manifestText, "url", value) ||
-            parseJsonStringField(manifestText, "packageUrl", value))
+    if (parseJsonStringField(manifestText, "package", value) || parseJsonStringField(manifestText, "url", value) ||
+        parseJsonStringField(manifestText, "packageUrl", value))
+    {
+        if (isHttpsUrl(value))
         {
-            if (isHttpsUrl(value))
-            {
-                metadata.packageUrl = value;
-                metadata.packageName = extractFilenameFromUrl(value);
-                hasAny = true;
-            }
+            metadata.packageUrl = value;
+            metadata.packageName = extractFilenameFromUrl(value);
+            hasAny = true;
         }
+    }
 
     if (parseJsonStringField(manifestText, "checksum", value) || parseJsonStringField(manifestText, "sha256", value))
     {
@@ -405,9 +405,8 @@ bool downloadToString(const std::string& url, std::string& payload, std::string&
         return false;
     }
 
-    const auto response = cpr::Get(cpr::Url{url}, cpr::VerifySsl{true}, cpr::ssl::VerifyHost{true}, cpr::ssl::VerifyPeer{true},
-                                   cpr::Header{{"User-Agent", PROJECT_NAME "/" PROJECT_VERSION}}, cpr::Timeout{20000},
-                                   cpr::Redirect{true}, cpr::MaxRedirects{3});
+    const auto response = cpr::Get(cpr::Url{url}, cpr::VerifySsl{true}, cpr::Header{{"User-Agent", PROJECT_NAME "/" PROJECT_VERSION}},
+                                   cpr::Timeout{20000});
     if (response.error)
     {
         error = response.error.message;
@@ -475,9 +474,15 @@ bool validateMetadataEnvelope(const UpdateMetadata& metadata, std::string& error
         return false;
     }
 
-    if (!metadata.packageName.empty() && !isHttpsUrl(metadata.packageUrl))
+    if (!metadata.packageUrl.empty() && !isHttpsUrl(metadata.packageUrl))
     {
         error = "Package URL is not HTTPS";
+        return false;
+    }
+
+    if (metadata.packageUrl.empty() && metadata.packageName.empty())
+    {
+        error = "Metadata missing package download target";
         return false;
     }
 
@@ -569,7 +574,7 @@ bool verifySignedMetadata(const UpdateMetadata& metadata, std::string& error)
         return true;
     }
 
-    error = "Signature verification requires runtime trust-chain support that is not configured";
+    error = "Signature verification requires runtime trust-chain support that is not configured in this build";
     return false;
 }
 
@@ -833,6 +838,7 @@ bool Updater::fetchReleaseMetadata(UpdateMetadata& metadata, std::string& error)
     }
 
     // Optional manifest asset can provide checksum and signature.
+    bool manifestResolved = false;
     for (const auto& asset : metadata.assets)
     {
         std::string candidateName = asset.name;
@@ -847,9 +853,18 @@ bool Updater::fetchReleaseMetadata(UpdateMetadata& metadata, std::string& error)
             if (downloadToString(asset.downloadUrl, manifestText, error))
             {
                 parseManifestFromText(manifestText, metadata);
-                metadata.packageName = asset.name;
+                manifestResolved = true;
             }
         }
+    }
+
+    if (manifestResolved && !metadata.packageUrl.empty())
+    {
+        metadata.packageName = sanitizeFileName(metadata.packageName.empty() ? extractFilenameFromUrl(metadata.packageUrl) : metadata.packageName);
+    }
+    else
+    {
+        metadata.packageName.clear();
     }
 
     if (!validateMetadataEnvelope(metadata, error))
@@ -863,6 +878,19 @@ bool Updater::fetchReleaseMetadata(UpdateMetadata& metadata, std::string& error)
 
 bool Updater::resolvePlatformPackage(const UpdateMetadata& metadata, UpdateMetadata& resolved, std::string& error) const
 {
+    if (!metadata.packageUrl.empty())
+    {
+        resolved           = metadata;
+        resolved.packageUrl = metadata.packageUrl;
+        resolved.packageName = sanitizeFileName(!metadata.packageName.empty() ? metadata.packageName : extractFilenameFromUrl(metadata.packageUrl));
+        if (resolved.packageUrl.empty())
+        {
+            error = "Manifest package URL is empty";
+            return false;
+        }
+        return true;
+    }
+
     std::vector<UpdateAssetMetadata> candidates;
     for (const auto& asset : metadata.assets)
     {

@@ -8,8 +8,8 @@
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <limits>
 #include <optional>
+#include <limits>
 
 class Monitors
 {
@@ -82,16 +82,25 @@ protected:
         return true;
     }
 
+    static float pointToRectDistanceSq(const Vec2& point, const Vec2& minPoint, const Vec2& maxPoint)
+    {
+        const float clampedX = std::min(std::max(point.x, minPoint.x), maxPoint.x);
+        const float clampedY = std::min(std::max(point.y, minPoint.y), maxPoint.y);
+        const float dx = point.x - clampedX;
+        const float dy = point.y - clampedY;
+        return dx * dx + dy * dy;
+    }
+
     std::optional<MonitorTransform> findMonitorTransformForPoint(const Vec2& point,
                                                                 const bool preferPhysicalContainment = false) const
     {
+        std::lock_guard lock{m_mutex};
         const int monitorCount = m_enumerator ? m_enumerator->getMonitorsCount() : 0;
         if (monitorCount <= 0)
             return std::nullopt;
 
-        MonitorTransform bestTransform;
-        float          bestDistance = FLT_MAX;
-        bool           found       = false;
+        std::optional<MonitorTransform> bestTransform;
+        float                          bestDistance = std::numeric_limits<float>::infinity();
 
         for (int i = 0; i < monitorCount; ++i)
         {
@@ -99,25 +108,32 @@ protected:
             if (!buildMonitorTransform(i, transform))
                 continue;
 
-            if (preferPhysicalContainment ? transform.containsPhysicalPoint(point) : transform.containsLogicalPoint(point))
+            const bool pointInMonitor =
+                preferPhysicalContainment ? transform.containsPhysicalPoint(point) : transform.containsLogicalPoint(point);
+            if (pointInMonitor)
                 return transform;
 
-            const float clampedX = std::min(std::max(point.x, static_cast<float>(transform.logicalPosition.x)),
-                                            static_cast<float>(transform.logicalPosition.x + transform.logicalSize.x));
-            const float clampedY = std::min(std::max(point.y, static_cast<float>(transform.logicalPosition.y)),
-                                            static_cast<float>(transform.logicalPosition.y + transform.logicalSize.y));
-            const float dx = point.x - clampedX;
-            const float dy = point.y - clampedY;
-            const float distance = dx * dx + dy * dy;
-            if (!found || distance < bestDistance)
+            const Vec2 minPoint = preferPhysicalContainment
+                                      ? Vec2{static_cast<float>(transform.pixelPosition.x),
+                                             static_cast<float>(transform.pixelPosition.y)}
+                                      : Vec2{static_cast<float>(transform.logicalPosition.x),
+                                             static_cast<float>(transform.logicalPosition.y)};
+            const Vec2 maxPoint =
+                preferPhysicalContainment
+                    ? Vec2{static_cast<float>(transform.pixelPosition.x + transform.pixelSize.x),
+                           static_cast<float>(transform.pixelPosition.y + transform.pixelSize.y)}
+                    : Vec2{static_cast<float>(transform.logicalPosition.x + transform.logicalSize.x),
+                           static_cast<float>(transform.logicalPosition.y + transform.logicalSize.y)};
+
+            const float distance = pointToRectDistanceSq(point, minPoint, maxPoint);
+            if (!bestTransform || distance < bestDistance)
             {
-                found       = true;
-                bestDistance = distance;
+                bestDistance  = distance;
                 bestTransform = transform;
             }
         }
 
-        if (!found)
+        if (!bestTransform)
             return std::nullopt;
 
         return bestTransform;
@@ -144,11 +160,13 @@ protected:
             return -1;
 
         const Vec2 logicalPointAsFloat{static_cast<float>(logicalPoint.x), static_cast<float>(logicalPoint.y)};
-        const auto monitorTransform = findMonitorTransformForPoint(logicalPointAsFloat, false);
-        if (!monitorTransform)
+        const int monitorCount = m_enumerator->getMonitorsCount();
+        if (monitorCount <= 0)
             return -1;
 
-        const int monitorCount = m_enumerator->getMonitorsCount();
+        int   bestIndex   = -1;
+        float bestDistance = std::numeric_limits<float>::infinity();
+
         for (int i = 0; i < m_enumerator->getMonitorsCount(); ++i)
         {
             MonitorTransform monitorTransformCandidate;
@@ -156,40 +174,22 @@ protected:
                 continue;
 
             if (monitorTransformCandidate.containsLogicalPoint(logicalPointAsFloat))
-            {
                 return i;
-            }
-        }
 
-        for (int i = 0; i < monitorCount; ++i)
-        {
-            MonitorTransform monitorTransformCandidate;
-            if (!buildMonitorTransform(i, monitorTransformCandidate))
-                continue;
-
-            const float minX = static_cast<float>(monitorTransformCandidate.logicalPosition.x);
-            const float minY = static_cast<float>(monitorTransformCandidate.logicalPosition.y);
-            const float maxX = static_cast<float>(monitorTransformCandidate.logicalPosition.x + monitorTransformCandidate.logicalSize.x);
-            const float maxY = static_cast<float>(monitorTransformCandidate.logicalPosition.y + monitorTransformCandidate.logicalSize.y);
-
-            const float clampedX = std::min(std::max(logicalPointAsFloat.x, minX), maxX);
-            const float clampedY = std::min(std::max(logicalPointAsFloat.y, minY), maxY);
-            const float dx = logicalPointAsFloat.x - clampedX;
-            const float dy = logicalPointAsFloat.y - clampedY;
-            const float distance = dx * dx + dy * dy;
-
-            const auto closest = findMonitorTransformForPoint(logicalPointAsFloat, false);
-            if (closest)
+            const Vec2 minPoint{static_cast<float>(monitorTransformCandidate.logicalPosition.x),
+                               static_cast<float>(monitorTransformCandidate.logicalPosition.y)};
+            const Vec2 maxPoint{
+                static_cast<float>(monitorTransformCandidate.logicalPosition.x + monitorTransformCandidate.logicalSize.x),
+                static_cast<float>(monitorTransformCandidate.logicalPosition.y + monitorTransformCandidate.logicalSize.y)};
+            const float distance = pointToRectDistanceSq(logicalPointAsFloat, minPoint, maxPoint);
+            if (bestIndex < 0 || distance < bestDistance)
             {
-                if (monitorTransformCandidate.logicalPosition == closest->logicalPosition &&
-                    monitorTransformCandidate.logicalSize == closest->logicalSize)
-                    return i;
+                bestIndex   = i;
+                bestDistance = distance;
             }
-
-            (void)distance;
         }
 
-        return -1;
+        return bestIndex;
     }
 
     int getMainMonitorIndex() const

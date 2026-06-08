@@ -92,10 +92,27 @@ public:
         return static_cast<int>(monitors.size());
     }
 
+    int getPrimaryMonitorIndex() const override
+    {
+        GLFWmonitor* primary = glfwGetPrimaryMonitor();
+        if (!primary)
+            return -1;
+
+        return getIndex(primary);
+    }
+
     void getMainMonitorWorkingArea(Vec2i& position, Vec2i& size) const override
     {
-        getMonitorPosition(0, position);
-        getMonitorSize(0, size);
+        const int mainMonitor = getPrimaryMonitorIndex();
+        if (mainMonitor < 0)
+        {
+            position = Vec2i::zero();
+            size     = Vec2i::zero();
+            return;
+        }
+
+        getMonitorPosition(mainMonitor, position);
+        getMonitorSize(mainMonitor, size);
     }
 
     void getMonitorPixelPosition(int index, Vec2i& position) const override
