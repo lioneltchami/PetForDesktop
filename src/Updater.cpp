@@ -428,19 +428,39 @@ bool parseAssetList(const std::string& releaseJson, std::vector<UpdateAssetMetad
 bool parseManifestFromText(const std::string& manifestText, UpdateMetadata& metadata)
 {
     bool hasAny = false;
+    bool packageFieldPresent = false;
 
     std::string value;
-    if (parseJsonStringField(manifestText, "package", value) || parseJsonStringField(manifestText, "url", value) ||
-        parseJsonStringField(manifestText, "packageUrl", value))
+    auto parsePackageField = [&](const std::string& fieldValue) -> bool {
+        if (fieldValue.empty())
+            return false;
+
+        packageFieldPresent = true;
+        if (!isHttpsUrl(fieldValue))
+            return false;
+
+        metadata.packageUrl = fieldValue;
+        metadata.packageName = extractFilenameFromUrl(fieldValue);
+        if (metadata.packageName.size() > kManifestMaxPackageNameLength)
+            metadata.packageName = metadata.packageName.substr(0, kManifestMaxPackageNameLength);
+
+        return true;
+    };
+
+    bool hasPackageUrl = false;
+    if (parseJsonStringField(manifestText, "package", value))
+        hasPackageUrl = parsePackageField(value);
+    else if (parseJsonStringField(manifestText, "url", value))
+        hasPackageUrl = parsePackageField(value);
+    else if (parseJsonStringField(manifestText, "packageUrl", value))
+        hasPackageUrl = parsePackageField(value);
+
+    if (packageFieldPresent && !hasPackageUrl)
+        return false;
+
+    if (hasPackageUrl)
     {
-        if (isHttpsUrl(value))
-        {
-            metadata.packageUrl = value;
-            metadata.packageName = extractFilenameFromUrl(value);
-            if (metadata.packageName.size() > kManifestMaxPackageNameLength)
-                metadata.packageName = metadata.packageName.substr(0, kManifestMaxPackageNameLength);
-            hasAny = true;
-        }
+        hasAny = true;
     }
 
     if (parseJsonStringField(manifestText, "checksum", value) || parseJsonStringField(manifestText, "sha256", value))
@@ -448,7 +468,7 @@ bool parseManifestFromText(const std::string& manifestText, UpdateMetadata& meta
         if (!value.empty())
         {
             metadata.checksum = value;
-            hasAny       = true;
+            hasAny         = true;
         }
     }
 
@@ -459,7 +479,7 @@ bool parseManifestFromText(const std::string& manifestText, UpdateMetadata& meta
 
     if (parseJsonStringField(manifestText, "signature_algorithm", value))
     {
-        metadata.signatureAlgorithm = value;
+        metadata.signatureAlgorithm = toLowerAscii(value);
     }
 
     if (parseJsonStringField(manifestText, "signature_public_key", value))
@@ -469,7 +489,7 @@ bool parseManifestFromText(const std::string& manifestText, UpdateMetadata& meta
 
     if (parseJsonStringField(manifestText, "checksum_algorithm", value))
     {
-        metadata.checksumAlgorithm = value;
+        metadata.checksumAlgorithm = toLowerAscii(value);
         if (metadata.checksum.empty())
             metadata.checksumAlgorithm.clear();
     }

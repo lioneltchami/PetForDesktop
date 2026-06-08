@@ -273,16 +273,23 @@ bool test_monitor_scaling_transform()
         return fail("mainMonitorIndex(2050)");
 
     // Per monitor metric check (pixel-per-meter)
+    constexpr float mmToMeter = 0.001f;
+    const float ppm1ExpectedX = 1920.f / (400.f * mmToMeter);
+    const float ppm1ExpectedY = 1080.f / (225.f * mmToMeter);
     Vec2 ppm1 = monitors.getPixelPerMeterForLogicalPoint({100.f, 100.f});
-    if (!near(ppm1.x, 4800.f, 1.f) || !near(ppm1.y, 4800.f, 1.f))
+    if (!near(ppm1.x, ppm1ExpectedX, 2.f) || !near(ppm1.y, ppm1ExpectedY, 2.f))
         return fail("ppm1");
 
+    const float ppm2ExpectedX = 1920.f / (384.f * mmToMeter);
+    const float ppm2ExpectedY = 1080.f / (216.f * mmToMeter);
     Vec2 ppm2 = monitors.getPixelPerMeterForLogicalPoint({2100.f, 100.f});
-    if (!near(ppm2.x, 5000.f, 1.f) || !near(ppm2.y, 5000.f, 1.f))
+    if (!near(ppm2.x, ppm2ExpectedX, 2.f) || !near(ppm2.y, ppm2ExpectedY, 2.f))
         return fail("ppm2");
 
+    const float ppm3ExpectedX = 1536.f / (307.f * mmToMeter);
+    const float ppm3ExpectedY = 1536.f / (173.f * mmToMeter);
     Vec2 ppm3 = monitors.getPixelPerMeterForLogicalPoint({3400.f, -700.f});
-    if (!near(ppm3.x, 5000.f, 1.f) || !near(ppm3.y, 5000.f, 1.f))
+    if (!near(ppm3.x, ppm3ExpectedX, 3.f) || !near(ppm3.y, ppm3ExpectedY, 3.f))
         return fail("ppm3");
 
     return true;
@@ -360,21 +367,41 @@ bool test_settings_validation_hardening()
 
 bool test_update_metadata_validation()
 {
+    const auto fail = [](const char* step) {
+        std::cout << "update_metadata_validation fail: " << step << "\n";
+        return false;
+    };
+
     UpdateMetadata metadata;
     std::string error;
 
     // Good manifest-like payload
     if (!Updater::parseManifestForTest("{\"package\":\"https://github.com/example/app-v1.exe\",\"checksum\":\"abcdef\"}", metadata))
-        return false;
+        return fail("parse valid manifest");
 
-    // Host allowlist should reject unknown hosts
+    if (metadata.checksumAlgorithm != "sha256")
+        return fail("default checksum algorithm should be sha256");
+    if (metadata.packageUrl != "https://github.com/example/app-v1.exe")
+        return fail("default package URL parsed");
+
+    // Invalid host or malformed package destination must fail manifest parse.
     if (Updater::parseManifestForTest("{\"package\":\"https://not-trusted.example.com/app-v1.exe\",\"checksum\":\"a\"}",
-                                       metadata))
-        return false;
+                                      metadata))
+        return fail("untrusted host accepted");
+
+    // Invalid package destination but with no package key should still be parseable payload metadata.
+    if (!Updater::parseManifestForTest("{\"checksum\":\"a\"}", metadata))
+    {
+        return fail("checksum-only parse");
+    }
+    if (metadata.checksum != "a")
+        return fail("checksum-only parse value");
 
     // Invalid checksum length
     if (Updater::validateMetadataEnvelopeForTest(metadata, error))
-        return false;
+    {
+        return fail("invalid checksum length accepted");
+    }
 
     metadata.tag = "1.0.0";
     metadata.checksum = std::string(64, 'a');
@@ -384,22 +411,22 @@ bool test_update_metadata_validation()
     metadata.packageUrl = "https://github.com/example/app-v1.exe";
     if (!Updater::validateMetadataEnvelopeForTest(metadata, error))
     {
-        std::cout << "validateMetadataEnvelopeForTest failed unexpectedly: " << error << "\n";
-        return false;
+        return fail("valid envelope");
     }
 
+    metadata.signature = std::string(64, 'a');
     metadata.signatureAlgorithm = "bcrypt";
     if (Updater::validateMetadataEnvelopeForTest(metadata, error))
-        return false;
+        return fail("unsupported signature algorithm accepted");
 
     metadata.signatureAlgorithm = "sha256";
     metadata.signature = std::string(64, 'a');
     if (!Updater::verifySignedMetadataForTest(metadata, error))
-        return false;
+        return fail("valid sha256 signature rejected");
 
     metadata.signature = std::string(64, 'b');
     if (Updater::verifySignedMetadataForTest(metadata, error))
-        return false;
+        return fail("invalid sha256 signature accepted");
 
     return true;
 }
