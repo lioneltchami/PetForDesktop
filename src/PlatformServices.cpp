@@ -80,6 +80,29 @@ public:
         getMonitorSize(0, size);
     }
 
+    void getMonitorPixelPosition(int index, Vec2i& position) const override
+    {
+        position = Vec2i::zero();
+        if (index < 0 || index >= static_cast<int>(monitors.size()))
+            return;
+
+        glfwGetMonitorPos(monitors[index], &position.x, &position.y);
+    }
+
+    void getMonitorPixelSize(int index, Vec2i& size) const override
+    {
+        size = Vec2i::zero();
+        if (index < 0 || index >= static_cast<int>(monitors.size()))
+            return;
+
+        const GLFWvidmode* currentVideoMode = glfwGetVideoMode(monitors[index]);
+        if (currentVideoMode)
+        {
+            size.x = currentVideoMode->width;
+            size.y = currentVideoMode->height;
+        }
+    }
+
     void getMonitorContentScale(int index, Vec2& scale) const override
     {
         scale = Vec2::one();
@@ -106,28 +129,30 @@ public:
 
         for (int i = 0; i < static_cast<int>(monitors.size()); ++i)
         {
-            if (monitors[i])
-            {
-                const GLFWvidmode* currentVideoMode = glfwGetVideoMode(monitors[i]);
-                if (currentVideoMode)
-                {
-                    Vec2 scale{1.f, 1.f};
-                    getMonitorContentScale(i, scale);
-                    const float invScaleX = 1.f / std::max(scale.x, 0.01f);
-                    const float invScaleY = 1.f / std::max(scale.y, 0.01f);
-                    const int logicalWidth  = static_cast<int>(std::round(currentVideoMode->width * invScaleX));
-                    const int logicalHeight = static_cast<int>(std::round(currentVideoMode->height * invScaleY));
+            Vec2i monitorPixelPos;
+            Vec2i monitorPixelSize;
+            getMonitorPixelPosition(i, monitorPixelPos);
+            getMonitorPixelSize(i, monitorPixelSize);
 
-                    int monitorX = 0;
-                    int monitorY = 0;
-                    glfwGetMonitorPos(monitors[i], &monitorX, &monitorY);
+            if (!monitorPixelSize.x || !monitorPixelSize.y)
+                continue;
 
-                    minX = std::min(minX, monitorX);
-                    minY = std::min(minY, monitorY);
-                    maxX = std::max(maxX, monitorX + logicalWidth);
-                    maxY = std::max(maxY, monitorY + logicalHeight);
-                }
-            }
+            Vec2 scale{1.f, 1.f};
+            getMonitorContentScale(i, scale);
+            const float safeScaleX = std::max(scale.x, 0.01f);
+            const float safeScaleY = std::max(scale.y, 0.01f);
+
+            const int logicalLeft = static_cast<int>(std::floor(monitorPixelPos.x / safeScaleX));
+            const int logicalTop = static_cast<int>(std::floor(monitorPixelPos.y / safeScaleY));
+            const int logicalRight =
+                static_cast<int>(std::ceil((monitorPixelPos.x + monitorPixelSize.x) / safeScaleX));
+            const int logicalBottom =
+                static_cast<int>(std::ceil((monitorPixelPos.y + monitorPixelSize.y) / safeScaleY));
+
+            minX = std::min(minX, logicalLeft);
+            minY = std::min(minY, logicalTop);
+            maxX = std::max(maxX, logicalRight);
+            maxY = std::max(maxY, logicalBottom);
         }
 
         if (minX == INT_MAX || minY == INT_MAX || maxX == INT_MIN || maxY == INT_MIN)
@@ -140,24 +165,41 @@ public:
 
     void getMonitorPosition(int index, Vec2i& position) const override
     {
+        position = Vec2i::zero();
         if (index < 0 || index >= static_cast<int>(monitors.size()))
             return;
-        glfwGetMonitorPos(monitors[index], &position.x, &position.y);
+
+        Vec2i pixelPosition = Vec2i::zero();
+        getMonitorPixelPosition(index, pixelPosition);
+
+        Vec2 scale{1.f, 1.f};
+        getMonitorContentScale(index, scale);
+        const float safeScaleX = std::max(scale.x, 0.01f);
+        const float safeScaleY = std::max(scale.y, 0.01f);
+
+        position.x = static_cast<int>(std::round(pixelPosition.x / safeScaleX));
+        position.y = static_cast<int>(std::round(pixelPosition.y / safeScaleY));
     }
 
     void getMonitorSize(int index, Vec2i& size) const override
     {
+        size = Vec2i::zero();
         if (index < 0 || index >= static_cast<int>(monitors.size()))
             return;
 
-        const GLFWvidmode* currentVideoMode = glfwGetVideoMode(monitors[index]);
-        if (currentVideoMode)
-        {
-            Vec2 scale{1.f, 1.f};
-            getMonitorContentScale(index, scale);
-            size.x = static_cast<int>(std::round(currentVideoMode->width / std::max(scale.x, 0.01f)));
-            size.y = static_cast<int>(std::round(currentVideoMode->height / std::max(scale.y, 0.01f)));
-        }
+        Vec2i pixelSize = Vec2i::zero();
+        getMonitorPixelSize(index, pixelSize);
+
+        if (!pixelSize.x || !pixelSize.y)
+            return;
+
+        Vec2 scale{1.f, 1.f};
+        getMonitorContentScale(index, scale);
+        const float safeScaleX = std::max(scale.x, 0.01f);
+        const float safeScaleY = std::max(scale.y, 0.01f);
+
+        size.x = static_cast<int>(std::round(pixelSize.x / safeScaleX));
+        size.y = static_cast<int>(std::round(pixelSize.y / safeScaleY));
     }
 
     Vec2i getMonitorPhysicalSize() const override

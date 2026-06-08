@@ -2,6 +2,7 @@
 
 #include "Engine/Vector2.hpp"
 
+#include <algorithm>
 #include <functional>
 #include <mutex>
 #include <vector>
@@ -10,9 +11,40 @@ class Monitors;
 
 struct MonitorTopologyItem
 {
-    Vec2i position;
-    Vec2i size;
+    Vec2i position;      // Logical desktop coordinates
+    Vec2i size;          // Logical desktop size
+    Vec2i pixelPosition; // Physical pixel coordinates
+    Vec2i pixelSize;     // Physical pixel size
     Vec2  contentScale = Vec2::one();
+
+    bool containsLogicalPoint(const Vec2& logicalPoint) const
+    {
+        return logicalPoint.x >= static_cast<float>(position.x) && logicalPoint.x < static_cast<float>(position.x + size.x) &&
+               logicalPoint.y >= static_cast<float>(position.y) && logicalPoint.y < static_cast<float>(position.y + size.y);
+    }
+
+    Vec2 logicalToPhysical(const Vec2& logicalPoint) const
+    {
+        const float safeScaleX = std::max(contentScale.x, 0.0001f);
+        const float safeScaleY = std::max(contentScale.y, 0.0001f);
+
+        return {(logicalPoint.x - static_cast<float>(position.x)) * safeScaleX + static_cast<float>(pixelPosition.x),
+                (logicalPoint.y - static_cast<float>(position.y)) * safeScaleY + static_cast<float>(pixelPosition.y)};
+    }
+
+    Vec2 physicalToLogical(const Vec2& pixelPoint) const
+    {
+        const float safeScaleX = std::max(contentScale.x, 0.0001f);
+        const float safeScaleY = std::max(contentScale.y, 0.0001f);
+
+        return {(pixelPoint.x - static_cast<float>(pixelPosition.x)) / safeScaleX + static_cast<float>(position.x),
+                (pixelPoint.y - static_cast<float>(pixelPosition.y)) / safeScaleY + static_cast<float>(position.y)};
+    }
+
+    bool containsPhysicalPoint(const Vec2& pixelPoint) const
+    {
+        return containsLogicalPoint(physicalToLogical(pixelPoint));
+    }
 };
 
 class MonitorTopologyCache

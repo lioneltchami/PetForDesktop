@@ -2,7 +2,9 @@
 
 #include "Engine/Monitors.hpp"
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 
 namespace
 {
@@ -80,11 +82,19 @@ void MonitorTopologyCache::sampleNow()
     for (int i = 0; i < monitorCount; ++i)
     {
         MonitorTopologyItem topology;
-        m_monitors->getMonitorPosition(i, topology.position);
-        m_monitors->getMonitorSize(i, topology.size);
+        m_monitors->getMonitorPixelPosition(i, topology.pixelPosition);
+        m_monitors->getMonitorPixelSize(i, topology.pixelSize);
         m_monitors->getMonitorScale(i, topology.contentScale);
-        if (topology.size.x == 0 || topology.size.y == 0)
+
+        const float safeScaleX = std::max(topology.contentScale.x, 0.0001f);
+        const float safeScaleY = std::max(topology.contentScale.y, 0.0001f);
+        if (topology.pixelSize.x <= 0 || topology.pixelSize.y <= 0)
             continue;
+
+        topology.position.x = static_cast<int>(std::round(static_cast<float>(topology.pixelPosition.x) / safeScaleX));
+        topology.position.y = static_cast<int>(std::round(static_cast<float>(topology.pixelPosition.y) / safeScaleY));
+        topology.size.x = static_cast<int>(std::round(static_cast<float>(topology.pixelSize.x) / safeScaleX));
+        topology.size.y = static_cast<int>(std::round(static_cast<float>(topology.pixelSize.y) / safeScaleY));
 
         if (topology.contentScale.x <= 0.f || topology.contentScale.y <= 0.f)
             topology.contentScale = Vec2::one();

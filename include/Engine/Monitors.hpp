@@ -91,6 +91,22 @@ public:
         return m_enumerator->getMonitorsSize();
     }
 
+    void getMonitorPixelPosition(int index, Vec2i& position) const
+    {
+        std::lock_guard lock{m_mutex};
+        if (!m_enumerator)
+            return;
+        m_enumerator->getMonitorPixelPosition(index, position);
+    }
+
+    void getMonitorPixelSize(int index, Vec2i& size) const
+    {
+        std::lock_guard lock{m_mutex};
+        if (!m_enumerator)
+            return;
+        m_enumerator->getMonitorPixelSize(index, size);
+    }
+
     Vec2 getMonitorScale(int index, Vec2 defaultScale = Vec2::one()) const
     {
         Vec2 scale = defaultScale;

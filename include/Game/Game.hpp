@@ -132,10 +132,13 @@ public:
         if (datas.fullScreenWindow)
         {
             datas.window->setSize(monitorSize);
+            if (monitorPos.sqrLength() > 0.f)
+                datas.window->setPosition(monitorPos);
         }
         else
         {
-            datas.window->setPosition(monitorSize / 2);
+            Vec2i centeredPos = monitorPos + monitorSize / 2;
+            datas.window->setPosition(centeredPos);
         }
 
         // Evaluate pixel distance based on dpi and monitor size
