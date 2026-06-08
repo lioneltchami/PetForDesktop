@@ -2,7 +2,8 @@
 
 #include "Engine/Log.hpp"
 
-#include <cstdio> 
+#include <cstdio>
+#include <cerrno>
 
 class FileReader
 {
@@ -14,9 +15,14 @@ public:
     {
         size_t     string_size, read_size;
         FILE*   handler;
-        errno_t err;
+        int err = 0;
 
+#ifdef _WIN32
         err = fopen_s(&handler, filename, "rb");
+#else
+        handler = fopen(filename, "rb");
+        err = handler ? 0 : errno;
+#endif
         if (err != 0)
         {
             logf("The file '%s' was not opened\n", filename);
