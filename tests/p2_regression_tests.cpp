@@ -1,8 +1,13 @@
 #include "Engine/Monitors.hpp"
 #include "Engine/Platform/IWindowEnumerator.hpp"
 #include "Engine/MonitorTopologyCache.hpp"
+#include "Engine/PhysicSystem.hpp"
 #include "Engine/Settings.hpp"
+#include "Engine/StateMachine.hpp"
+#include "Engine/TimeManager.hpp"
 #include "Engine/Updater.hpp"
+#include "Game/AnimationTransitions.hpp"
+#include "Game/PetLogic.hpp"
 
 class Window;
 class Framebuffer;
@@ -10,7 +15,6 @@ class Shader;
 class Texture;
 class ScreenSpaceQuad;
 class InteractionSystem;
-class WorldSamplingSubsystem;
 class ContextualMenu;
 class SettingMenu;
 class UpdateMenu;
@@ -22,7 +26,6 @@ class Shader{};
 class Texture{};
 class ScreenSpaceQuad{};
 class InteractionSystem{};
-class WorldSamplingSubsystem{};
 class ContextualMenu{};
 class SettingMenu{};
 class UpdateMenu{};
@@ -31,10 +34,12 @@ class Pet{};
 #include "yaml-cpp/yaml.h"
 
 #include <cassert>
+#include <cstdlib>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -206,6 +211,59 @@ public:
             return Vec2i::zero();
 
         return m_monitors[index].physicalSize;
+    }
+};
+
+struct RecordingNode : public StateMachine::Node
+{
+    int enters  = 0;
+    int exits   = 0;
+    int updates = 0;
+
+    void onEnter(GameData& blackBoard) override
+    {
+        ++enters;
+        StateMachine::Node::onEnter(blackBoard);
+    }
+
+    void onUpdate(GameData& blackBoard, double dt) override
+    {
+        ++updates;
+        StateMachine::Node::onUpdate(blackBoard, dt);
+    }
+
+    void onExit(GameData& blackBoard) override
+    {
+        ++exits;
+        StateMachine::Node::onExit(blackBoard);
+    }
+};
+
+struct TriggerTransition : public StateMachine::Node::Transition
+{
+    bool trigger = false;
+    int  calls   = 0;
+
+    bool canTransition(GameData& blackBoard) override
+    {
+        (void)blackBoard;
+        ++calls;
+        return trigger;
+    }
+};
+
+struct InspectableRandomDelayTransition : public RandomDelayTransition
+{
+    using RandomDelayTransition::RandomDelayTransition;
+
+    float getDelay() const
+    {
+        return delay;
+    }
+
+    float getTimer() const
+    {
+        return timer;
     }
 };
 
@@ -574,6 +632,234 @@ bool test_cursor_normalization_for_scale_variants()
 
     return true;
 }
+
+bool test_state_machine_and_transition_helpers()
+{
+    GameData data{};
+
+    auto firstNode = std::make_shared<RecordingNode>();
+    auto targetA   = std::make_shared<RecordingNode>();
+    auto targetB   = std::make_shared<RecordingNode>();
+
+    auto transition = std::make_shared<TriggerTransition>();
+    transition->to.emplace_back(targetA);
+    transition->to.emplace_back(targetB);
+    firstNode->AddTransition(transition);
+
+    StateMachine machine(data);
+    machine.init(firstNode);
+
+    if (firstNode->enters != 1 || machine.getCurrent() != firstNode)
+        return false;
+
+    firstNode->canUseTransition = false;
+    transition->trigger          = true;
+    machine.update(0.016);
+    if (machine.getCurrent() != firstNode || firstNode->exits != 0)
+        return false;
+
+    firstNode->canUseTransition = true;
+
+    std::srand(1337);
+    const int expectedIndex = std::rand() % 2;
+    std::srand(1337);
+    machine.update(0.016);
+
+    const auto expectedNode = expectedIndex == 0 ? std::static_pointer_cast<StateMachine::Node>(targetA)
+                                                 : std::static_pointer_cast<StateMachine::Node>(targetB);
+    if (machine.getCurrent() != expectedNode)
+        return false;
+    if (firstNode->exits != 1 || (expectedIndex == 0 ? targetA->enters : targetB->enters) != 1)
+        return false;
+    if (transition->calls == 0)
+        return false;
+
+    std::srand(2024);
+    const int expectedDelayMs = 75 + (std::rand() % (2 * 25 + 1)) - 25;
+    std::srand(2024);
+    InspectableRandomDelayTransition randomDelay(75, 25);
+    randomDelay.onEnter(data);
+    if (!near(randomDelay.getDelay(), static_cast<float>(expectedDelayMs) / 1000.f))
+        return false;
+
+    randomDelay.onUpdate(data, static_cast<double>(expectedDelayMs) / 1000.0 - 0.001);
+    if (randomDelay.canTransition(data))
+        return false;
+
+    randomDelay.onUpdate(data, 0.002);
+    if (!randomDelay.canTransition(data))
+        return false;
+
+    if (!AnimationTransitionLogic::shouldTransitionWhenGrounded(true) ||
+        AnimationTransitionLogic::shouldTransitionWhenGrounded(false))
+        return false;
+    if (!AnimationTransitionLogic::shouldTransitionWhenNotGrounded(false) ||
+        AnimationTransitionLogic::shouldTransitionWhenNotGrounded(true))
+        return false;
+    if (!AnimationTransitionLogic::shouldTransitionOnLeftPressOver(true) ||
+        AnimationTransitionLogic::shouldTransitionOnLeftPressOver(false))
+        return false;
+    if (!AnimationTransitionLogic::shouldTransitionOnTouchScreenEdge(true) ||
+        AnimationTransitionLogic::shouldTransitionOnTouchScreenEdge(false))
+        return false;
+    if (!AnimationTransitionLogic::shouldTransitionWhenAnimationDone(true) ||
+        AnimationTransitionLogic::shouldTransitionWhenAnimationDone(false))
+        return false;
+
+    bool leftWasPressed = false;
+    if (AnimationTransitionLogic::updateEndLeftClickState(true, GLFW_PRESS, leftWasPressed))
+        return false;
+    if (!leftWasPressed)
+        return false;
+    if (!AnimationTransitionLogic::updateEndLeftClickState(false, GLFW_RELEASE, leftWasPressed))
+        return false;
+    if (leftWasPressed)
+        return false;
+
+    return true;
+}
+
+bool test_physics_motion_drag_and_collision_states()
+{
+    GameData motionData{};
+    motionData.pixelPerMeter = {10.f, 10.f};
+    motionData.gravity       = {0.f, 0.f};
+    motionData.gravityDir    = {0.f, 1.f};
+    motionData.friction      = 0.f;
+    motionData.continuousCollisionMaxSqrVelocity = 100000.f;
+    motionData.bounciness                        = 0.5f;
+    motionData.isGroundedDetection               = 1.f;
+    motionData.footBasementWidth                 = 4;
+    motionData.footBasementHeight                = 4;
+
+    PhysicSystem motionPhysics(motionData);
+
+    Rect rect;
+    rect.setPositionSize({10.f, 10.f}, {10.f, 10.f});
+    PhysicComponent      comp(rect);
+    InteractionComponent interaction(rect);
+
+    comp.continuousVelocity = {2.f, 0.f};
+    comp.velocity           = {3.f, 0.f};
+    motionPhysics.update(comp, interaction, 0.5);
+    if (!near(rect.getPosition().x, 35.f) || !near(rect.getPosition().y, 10.f))
+        return false;
+    if (!near(comp.velocity.x, 3.f) || !near(comp.velocity.y, 0.f))
+        return false;
+    if (comp.isGrounded)
+        return false;
+
+    interaction.isLeftSelected = true;
+    motionData.deltaCursorPosX  = 7.f;
+    motionData.deltaCursorPosY  = -3.f;
+    motionPhysics.update(comp, interaction, 0.25);
+    if (!near(rect.getPosition().x, 42.f) || !near(rect.getPosition().y, 7.f))
+        return false;
+    if (!near(motionData.deltaCursorPosX, 0.f) || !near(motionData.deltaCursorPosY, 0.f))
+        return false;
+
+    GameData collisionData{};
+    auto     fakeMonitors = std::make_unique<FakeWindowEnumerator>();
+    fakeMonitors->addMonitor({{0, 0}, {1920, 1080}, {400, 225}, {1.f, 1.f}});
+    collisionData.monitors.setImplementation(std::move(fakeMonitors));
+    collisionData.gravityDir      = {0.f, 1.f};
+    collisionData.isGroundedDetection = 1.f;
+    collisionData.bounciness      = 0.5f;
+    collisionData.footBasementWidth  = 4;
+    collisionData.footBasementHeight = 4;
+
+    PhysicSystem collisionPhysics(collisionData);
+
+    Rect groundedRect;
+    groundedRect.setPositionSize({0.f, 0.f}, {10.f, 10.f});
+    PhysicComponent groundedComp(groundedRect);
+    groundedComp.velocity = {0.f, -0.5f};
+    if (!collisionPhysics.checkIsGrounded(groundedComp))
+        return false;
+    groundedComp.velocity = {1.f, 0.f};
+    if (collisionPhysics.checkIsGrounded(groundedComp))
+        return false;
+
+    Rect collisionRect;
+    collisionRect.setPositionSize({1950.f, 1050.f}, {100.f, 100.f});
+    PhysicComponent collisionComp(collisionRect);
+    collisionComp.velocity           = {0.1f, 0.1f};
+    collisionComp.isGrounded         = false;
+    collisionComp.isOnBottomOfWindow = false;
+    collisionComp.touchScreenEdge    = false;
+    collisionPhysics.computeMonitorCollisions(collisionComp);
+    if (!collisionComp.touchScreenEdge || !collisionComp.isOnBottomOfWindow || !collisionComp.isGrounded)
+        return false;
+    if (!near(collisionComp.getRect().getPosition().x, 1820.f) || !near(collisionComp.getRect().getPosition().y, 980.f))
+        return false;
+    if (!near(collisionComp.velocity.x, 0.f) || !near(collisionComp.velocity.y, 0.f))
+        return false;
+
+    return true;
+}
+
+bool test_pause_resume_and_release_velocity()
+{
+    GameData data{};
+    data.coyoteTimeCursorPos = 0.5f;
+    data.releaseImpulse      = 2.f;
+
+    auto firstNode = std::make_shared<StateMachine::Node>();
+    auto pauseNode = std::make_shared<StateMachine::Node>();
+
+    StateMachine animator(data);
+    animator.init(firstNode);
+
+    Rect rect;
+    rect.setPositionSize({0.f, 0.f}, {10.f, 10.f});
+    PhysicComponent comp(rect);
+    comp.velocity           = {5.f, -2.f};
+    comp.continuousVelocity = {1.f, 3.f};
+
+    bool isPaused = false;
+    PetLogic::applyPauseState(true, isPaused, animator, pauseNode, firstNode, comp);
+    if (!isPaused || animator.getCurrent() != pauseNode || animator.getCurrent()->canUseTransition)
+        return false;
+    if (!near(comp.velocity.x, 0.f) || !near(comp.velocity.y, 0.f) || !near(comp.continuousVelocity.x, 0.f) ||
+        !near(comp.continuousVelocity.y, 0.f))
+        return false;
+
+    PetLogic::applyPauseState(false, isPaused, animator, pauseNode, firstNode, comp);
+    if (isPaused || animator.getCurrent() != firstNode || !animator.getCurrent()->canUseTransition)
+        return false;
+    if (!near(comp.velocity.x, 0.f) || !near(comp.velocity.y, 0.f) || !near(comp.continuousVelocity.x, 0.f) ||
+        !near(comp.continuousVelocity.y, 0.f))
+        return false;
+
+    const Vec2 releaseVelocity = PetLogic::computeReleaseVelocity(data, Vec2{4.f, 3.f}, Vec2{2.f, 4.f});
+    if (!near(releaseVelocity.x, 8.f) || !near(releaseVelocity.y, 3.f))
+        return false;
+
+    return true;
+}
+
+bool test_cursor_delta_pruning()
+{
+    GameData data{};
+    data.coyoteTimeCursorPos = 0.05f;
+    data.timeAcc             = 1.0;
+
+    data.deltaCursorAcc = {0.f, 0.f};
+    data.deltasCursorPosBuffer.push({0.90f, {1.f, 2.f}});
+    data.deltaCursorAcc += Vec2{1.f, 2.f};
+    data.deltasCursorPosBuffer.push({0.97f, {3.f, 4.f}});
+    data.deltaCursorAcc += Vec2{3.f, 4.f};
+
+    TimeManagerLogic::pruneExpiredCursorDeltas(data, 1.0);
+    if (!near(data.deltaCursorAcc.x, 3.f) || !near(data.deltaCursorAcc.y, 4.f) || data.deltasCursorPosBuffer.size() != 1)
+        return false;
+
+    TimeManagerLogic::pruneExpiredCursorDeltas(data, 1.03);
+    if (!near(data.deltaCursorAcc.x, 0.f) || !near(data.deltaCursorAcc.y, 0.f) || !data.deltasCursorPosBuffer.empty())
+        return false;
+
+    return true;
+}
 } // namespace
 
 int main()
@@ -585,6 +871,10 @@ int main()
         {"update_metadata_validation", test_update_metadata_validation},
         {"cursor_normalization_for_mixed_scale", test_cursor_normalization_for_mixed_scale},
         {"cursor_normalization_for_scale_variants", test_cursor_normalization_for_scale_variants},
+        {"state_machine_and_transition_helpers", test_state_machine_and_transition_helpers},
+        {"physics_motion_drag_and_collision_states", test_physics_motion_drag_and_collision_states},
+        {"pause_resume_and_release_velocity", test_pause_resume_and_release_velocity},
+        {"cursor_delta_pruning", test_cursor_delta_pruning},
     };
 
     int failed = 0;

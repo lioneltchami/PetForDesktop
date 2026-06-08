@@ -27,6 +27,72 @@ int logicalCeil(float pixelPos, float scale)
 {
     return static_cast<int>(std::ceil(pixelPos / scale));
 }
+
+#ifdef PET_P2_TESTS
+class TestWindowEnumerator : public IWindowEnumerator
+{
+public:
+    void init() override {}
+
+    void onMonitorConnectionChanged(void*, int) override {}
+
+    int getMonitorsCount() const override
+    {
+        return 0;
+    }
+
+    int getPrimaryMonitorIndex() const override
+    {
+        return -1;
+    }
+
+    void getMainMonitorWorkingArea(Vec2i& position, Vec2i& size) const override
+    {
+        position = Vec2i::zero();
+        size     = Vec2i::zero();
+    }
+
+    Vec2i getMonitorsSize() const override
+    {
+        return Vec2i::zero();
+    }
+
+    void getMonitorPixelPosition(int, Vec2i& position) const override
+    {
+        position = Vec2i::zero();
+    }
+
+    void getMonitorPixelSize(int, Vec2i& size) const override
+    {
+        size = Vec2i::zero();
+    }
+
+    void getMonitorContentScale(int, Vec2& scale) const override
+    {
+        scale = Vec2::one();
+    }
+
+    void getMonitorPosition(int, Vec2i& position) const override
+    {
+        position = Vec2i::zero();
+    }
+
+    void getMonitorSize(int, Vec2i& size) const override
+    {
+        size = Vec2i::zero();
+    }
+
+    Vec2i getMonitorPhysicalSize() const override
+    {
+        return Vec2i::zero();
+    }
+
+    Vec2i getMonitorPhysicalSize(int) const override
+    {
+        return Vec2i::zero();
+    }
+};
+#endif
 } // namespace
 
 #ifdef _WIN32
@@ -522,7 +588,11 @@ namespace PlatformServices
 {
 std::unique_ptr<IWindowEnumerator> createWindowEnumerator()
 {
+#ifdef PET_P2_TESTS
+    return std::make_unique<TestWindowEnumerator>();
+#else
     return std::make_unique<WindowEnumeratorGLFW>();
+#endif
 }
 
 std::unique_ptr<IScreenCapture> createScreenCapture()

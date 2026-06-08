@@ -183,6 +183,7 @@ add_executable(pet-p2-tests
     tests/p2_regression_tests.cpp
     src/FileExplorer.cpp
     src/PlatformServices.cpp
+    src/PetLogic.cpp
     src/Settings.cpp
     src/MonitorTopologyCache.cpp
     src/Updater.cpp

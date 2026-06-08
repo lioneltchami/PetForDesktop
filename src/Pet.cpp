@@ -35,24 +35,7 @@ Pet::~Pet()
 
 void Pet::setIsPaused(bool flag)
 {
-    if (isPaused == flag)
-        return;
-
-    isPaused = flag;
-    if (isPaused)
-    {
-        animator.setCurrent(pauseNode);
-        animator.getCurrent()->canUseTransition = false;
-    }
-    else
-    {
-        animator.setCurrent(firstNode);
-        animator.getCurrent()->canUseTransition = true;
-       
-    }
-
-    physicComponent.velocity           = {0.f, 0.f};
-    physicComponent.continuousVelocity = {0.f, 0.f};
+    PetLogic::applyPauseState(flag, isPaused, animator, pauseNode, firstNode, physicComponent);
 }
 
 void Pet::setPosition(const Vec2 position)
@@ -377,8 +360,7 @@ void Pet::update(double deltaTime)
             localPixelPerMeter = datas.pixelPerMeter;
         }
 
-        physicComponent.velocity =
-            datas.deltaCursorAcc / datas.coyoteTimeCursorPos / localPixelPerMeter * datas.releaseImpulse;
+        physicComponent.velocity = PetLogic::computeReleaseVelocity(datas, datas.deltaCursorAcc, localPixelPerMeter);
     }
 
     if (interactionComponent.isLeftPressOver)

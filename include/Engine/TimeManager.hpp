@@ -11,6 +11,20 @@
 #include <vector>
 #include <cmath>
 
+namespace TimeManagerLogic
+{
+inline void pruneExpiredCursorDeltas(GameData& datas, double nowSeconds)
+{
+    while (!datas.deltasCursorPosBuffer.empty() &&
+           datas.deltasCursorPosBuffer.top().timer + datas.coyoteTimeCursorPos <= nowSeconds)
+    {
+        const GameData::DeltaCursosPosElem& elem = datas.deltasCursorPosBuffer.top();
+        datas.deltaCursorAcc -= elem.pos;
+        datas.deltasCursorPosBuffer.pop();
+    }
+}
+} // namespace TimeManagerLogic
+
 struct TimerTask
 {
     std::function<void()> task        = nullptr;
@@ -126,13 +140,7 @@ public:
             m_timerQueue.pop();
         }
 
-        while (!datas->deltasCursorPosBuffer.empty() &&
-               datas->deltasCursorPosBuffer.top().timer + datas->coyoteTimeCursorPos <= datas->timeAcc)
-        {
-            const GameData::DeltaCursosPosElem& elem = datas->deltasCursorPosBuffer.top();
-            datas->deltaCursorAcc -= elem.pos;
-            datas->deltasCursorPosBuffer.pop();
-        }
+        TimeManagerLogic::pruneExpiredCursorDeltas(*datas, datas->timeAcc);
     }
 
     double getInterpolation() const

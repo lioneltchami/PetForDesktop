@@ -9,6 +9,7 @@
 #include "Engine/UtilitySystem.hpp"
 #include "Game/DialoguePopUp.hpp"
 #include "Game/GameData.hpp"
+#include "Game/PetLogic.hpp"
 
 #include <map>
 #include <string>

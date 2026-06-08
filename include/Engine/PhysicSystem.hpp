@@ -19,12 +19,14 @@ protected:
 
     std::vector<MonitorTopologyItem> resolveMonitorTopologyForCollision() const
     {
+#ifndef PET_P2_TESTS
         if (data.worldSampling)
         {
             const auto cachedTopology = data.worldSampling->getMonitorTopologySnapshot();
             if (!cachedTopology.empty())
                 return cachedTopology;
         }
+#endif
 
         if (!data.monitors.getMonitorsCount())
             return {};
@@ -177,15 +179,23 @@ public:
 
     bool CatpureScreenCollision(const PhysicComponent& comp, const Vec2 prevToNewWinPos, Vec2& newPos)
     {
+#ifdef PET_P2_TESTS
+        (void)comp;
+        (void)prevToNewWinPos;
+        (void)newPos;
+        return false;
+#else
         if (!data.worldSampling)
             return false;
 
         return data.worldSampling->checkSurfaceCollision(const_cast<PhysicComponent&>(comp), prevToNewWinPos, newPos, data);
+#endif
     }
 
     void update(PhysicComponent& comp, InteractionComponent& interactionComp, double deltaTime)
     {
         Vec2 localPixelPerMeter = data.pixelPerMeter;
+#ifndef PET_P2_TESTS
         if (data.worldSampling)
         {
             const Vec2 motionProbePoint = comp.getRect().getPosition() + comp.getRect().getSize() * 0.5f;
@@ -200,6 +210,9 @@ public:
         {
             localPixelPerMeter = data.monitors.getPixelPerMeterForLogicalPoint(comp.getRect().getPosition(), data.pixelPerMeter);
         }
+#else
+        localPixelPerMeter = data.monitors.getPixelPerMeterForLogicalPoint(comp.getRect().getPosition(), data.pixelPerMeter);
+#endif
 
         // Apply gravity if not selected
         if (interactionComp.isLeftSelected)

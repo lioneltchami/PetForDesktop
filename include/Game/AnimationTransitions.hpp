@@ -5,6 +5,48 @@
 
 #include <GLFW/glfw3.h>
 
+namespace AnimationTransitionLogic
+{
+inline bool shouldTransitionWhenAnimationDone(bool animationDone)
+{
+    return animationDone;
+}
+
+inline bool shouldTransitionWhenGrounded(bool isGrounded)
+{
+    return isGrounded;
+}
+
+inline bool shouldTransitionWhenNotGrounded(bool isGrounded)
+{
+    return !isGrounded;
+}
+
+inline bool shouldTransitionOnLeftPressOver(bool isLeftPressOver)
+{
+    return isLeftPressOver;
+}
+
+inline bool shouldTransitionOnTouchScreenEdge(bool touchScreenEdge)
+{
+    return touchScreenEdge;
+}
+
+inline bool updateEndLeftClickState(bool isLeftPressOver, int leftButtonEvent, bool& leftWasPressed)
+{
+    if (isLeftPressOver)
+        leftWasPressed = true;
+
+    if (leftButtonEvent != GLFW_PRESS && leftWasPressed)
+    {
+        leftWasPressed = false;
+        return true;
+    }
+
+    return false;
+}
+} // namespace AnimationTransitionLogic
+
 struct AnimationEndTransition : public StateMachine::Node::Transition
 {
     class Pet& pet;
@@ -58,7 +100,13 @@ public:
         return timer >= delay;
     };
 
-    void onEnter(GameData& blackBoard) final;
+    void onEnter(GameData& blackBoard) final
+    {
+        (void)blackBoard;
+        timer = 0.f;
+        delay = static_cast<float>(baseDelay_ms + randNum(-interval_ms, interval_ms));
+        delay *= 0.001f; // to second
+    }
 
     void onUpdate(GameData& blackBoard, double dt) final
     {
