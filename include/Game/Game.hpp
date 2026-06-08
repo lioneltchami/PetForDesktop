@@ -151,6 +151,9 @@ public:
 
     ~Game()
     {
+        datas.monitors.clearTopologyChangedCallback();
+        if (datas.window)
+            datas.window->setMonitorCallback(nullptr);
         cleanUI();
         glfwTerminate();
     }
@@ -198,7 +201,11 @@ public:
         datas.window->setPosition(Vec2::zero());
         TimeManager::instance().setFrameRate(1);
         TimeManager::instance().emplaceTimer(
-            [&]() { datas.monitorTopology->refreshIfNeeded(datas.timeAcc); }, 1.0 / 12.0, true);
+            [&]() {
+                if (datas.monitorTopology)
+                    datas.monitorTopology->refreshIfNeeded(datas.timeAcc);
+            },
+            1.0 / 12.0, true);
 
         TimeManager::instance().start();
         while (!datas.window->shouldClose())
@@ -321,7 +328,11 @@ public:
             },
             1.f / datas.physicFrameRate, true);
         TimeManager::instance().emplaceTimer(
-            [&]() { datas.monitorTopology->refreshIfNeeded(datas.timeAcc); }, 1.0 / 12.0, true);
+            [&]() {
+                if (datas.monitorTopology)
+                    datas.monitorTopology->refreshIfNeeded(datas.timeAcc);
+            },
+            1.0 / 12.0, true);
 
         TimeManager::instance().start();
         while (!datas.window->shouldClose())
