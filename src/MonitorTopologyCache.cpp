@@ -2,6 +2,17 @@
 
 #include "Engine/Monitors.hpp"
 
+#include <chrono>
+
+namespace
+{
+double nowSeconds()
+{
+    using Clock = std::chrono::steady_clock;
+    return std::chrono::duration<double>(Clock::now().time_since_epoch()).count();
+}
+}
+
 void MonitorTopologyCache::bindMonitors(const Monitors* monitors)
 {
     std::lock_guard lock{m_mutex};
@@ -15,7 +26,7 @@ void MonitorTopologyCache::attachHotplugBridge(Monitors* monitors)
     bindMonitors(monitors);
     if (!monitors)
         return;
-    monitors->setTopologyChangedCallback([this]() { markDirty(); });
+    monitors->setTopologyChangedCallback([this]() { forceRefresh(nowSeconds()); });
     m_hotplugMonitors = monitors;
 }
 
