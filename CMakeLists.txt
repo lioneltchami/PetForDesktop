@@ -122,6 +122,7 @@ elseif(PETFORDESKTOP_USE_FETCHCONTENT_DEPS)
         GIT_SHALLOW TRUE
         SOURCE_DIR "${PET_IMGUI_ROOT_DIR}")
     FetchContent_Populate(imgui)
+    configure_file("${ABS_DEPS_DIR}/imgui/CMakeLists.txt" "${PET_IMGUI_ROOT_DIR}/CMakeLists.txt" COPYONLY)
     add_subdirectory("${PET_IMGUI_ROOT_DIR}")
 else()
     message(FATAL_ERROR
@@ -209,7 +210,7 @@ add_executable(pet-p2-tests
     src/Updater.cpp
 )
 
-target_include_directories(pet-p2-tests PRIVATE ${ABS_INCLUDE_DIR} ${ABS_SRC_DIR} ${ABS_DEPS_DIR}/imgui/imgui)
+target_include_directories(pet-p2-tests PRIVATE ${ABS_INCLUDE_DIR} ${ABS_SRC_DIR} ${PET_IMGUI_ROOT_DIR})
 target_link_libraries(pet-p2-tests PRIVATE ${PET_BOXER_TARGET} ${PET_YAMLCPP_TARGET} ${PET_CPR_TARGET} ${PET_GLFW_TARGET})
 
 target_compile_definitions(pet-p2-tests PRIVATE PET_P2_TESTS)
