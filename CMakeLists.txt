@@ -222,3 +222,4 @@ if(WIN32)
 endif()
 
 add_test(NAME pet-p2-regression COMMAND pet-p2-tests)
+set_tests_properties(pet-p2-regression PROPERTIES TIMEOUT 600)

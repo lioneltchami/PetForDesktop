@@ -924,6 +924,7 @@ int main()
     int failed = 0;
     for (const auto& [name, fn] : tests)
     {
+        std::cout << "[RUN] " << name << std::endl;
         const bool ok = fn();
         std::cout << "[" << (ok ? "PASS" : "FAIL") << "] " << name << "\n";
         if (!ok)
