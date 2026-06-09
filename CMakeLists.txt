@@ -54,7 +54,7 @@ function(pet_add_dependency dep_name local_path git_repo git_tag)
             ${dep_name}
             GIT_REPOSITORY ${git_repo}
             GIT_TAG ${git_tag}
-            GIT_SHALLOW TRUE)
+            GIT_SHALLOW FALSE)
         FetchContent_MakeAvailable(${dep_name})
         return()
     endif()
