@@ -17,13 +17,24 @@ env:
   MACOS_FOLDER: MaxOs
   VERSION: ${{ github.ref_name }}
   WINDOWS_ARCHIVE: ${{ github.event.repository.name }}_${{ github.ref_name }}_windows_x64.zip
+  WINDOWS_ARCHIVE_SHA: ${{ github.event.repository.name }}_${{ github.ref_name }}_windows_x64.zip.sha256
+  WINDOWS_MSIX_ARCHIVE: ${{ github.event.repository.name }}_${{ github.ref_name }}_windows_x64.msix
+  WINDOWS_MSIX_SHA: ${{ github.event.repository.name }}_${{ github.ref_name }}_windows_x64.msix.sha256
   LINUX_ARCHIVE: ${{ github.event.repository.name }}_${{ github.ref_name }}_linux_x64.tar.gz
+  LINUX_ARCHIVE_SHA: ${{ github.event.repository.name }}_${{ github.ref_name }}_linux_x64.tar.gz.sha256
   MACOS_ARCHIVE: ${{ github.event.repository.name }}_${{ github.ref_name }}_macos_x64.tar.gz
+  MACOS_ARCHIVE_SHA: ${{ github.event.repository.name }}_${{ github.ref_name }}_macos_x64.tar.gz.sha256
+  WINDOWS_MSIX_PUBLISHER: CN=Foxland
+  WINDOWS_PFX_PATH: ${{ github.workspace }}/windows-release-pfx.pfx
 
 jobs:
   windows_msvc:
     name: Windows | MSVC
     runs-on: windows-latest
+
+    outputs:
+      msix-packaged: ${{ steps.make-msix.outputs.packaged }}
+      msix-signed: ${{ steps.make-msix.outputs.signed }}
 
     strategy:
       fail-fast: false
@@ -56,15 +67,153 @@ jobs:
           Compress-Archive -Path "${{ env.BINARY_FOLDER }}/${{ env.WIN64_FOLDER }}/${{ env.PROJECT_NAME }}/*" -DestinationPath "${{ env.WINDOWS_ARCHIVE }}" -CompressionLevel Optimal
 
           $hash = (Get-FileHash -Algorithm SHA256 -Path "${{ env.WINDOWS_ARCHIVE }}").Hash.ToLower()
-          "$hash  ${{ env.WINDOWS_ARCHIVE }}" | Out-File -Encoding utf8 "${{ env.WINDOWS_ARCHIVE }}.sha256"
+          "$hash  ${{ env.WINDOWS_ARCHIVE }}" | Out-File -FilePath "${{ env.WINDOWS_ARCHIVE_SHA }}" -Encoding utf8
+
+      - name: Create MSIX package and sign if certificates are configured
+        id: make-msix
+        shell: pwsh
+        env:
+          WINDOWS_CODE_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_CODE_SIGNING_PFX_BASE64 }}
+          WINDOWS_CODE_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PFX_PASSWORD }}
+          WINDOWS_MSIX_TIMESTAMP_URL: http://timestamp.digicert.com
+        run: |
+          $packaged = "false"
+          $signed = "false"
+          $staging = Join-Path $pwd "msix"
+          $source = Join-Path $pwd "${{ env.BINARY_FOLDER }}/${{ env.WIN64_FOLDER }}/${{ env.PROJECT_NAME }}"
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+          if (-not (Test-Path "$source")) {
+            Write-Host "::warning::Windows staging source path not found: $source"
+            "packaged=$packaged" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "signed=$signed" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            return
+          }
+
+          Copy-Item -Recurse -Force "$source/*" "$staging"
+          $assetPath = Join-Path $staging "Assets"
+          New-Item -ItemType Directory -Force -Path $assetPath | Out-Null
+
+          $rawVersion = "${{ github.ref_name }}"
+          $cleanVersion = ($rawVersion -replace '^v','') -replace '[^0-9\.]',''
+          $parts = ($cleanVersion -split '\.') | Where-Object { $_ -ne '' }
+          while ($parts.Count -lt 3) {
+            $parts += '0'
+          }
+          $msixVersion = "$($parts[0]).$($parts[1]).$($parts[2]).0"
+
+          if (Test-Path "content/sprites/logo/Digital-Patreon-Logo_FieryCoral.png") {
+            Copy-Item "content/sprites/logo/Digital-Patreon-Logo_FieryCoral.png" (Join-Path $assetPath "Logo.png") -Force
+          }
+
+          $manifest = @"
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+         IgnorableNamespaces="uap rescap desktop">
+  <Identity Name="com.foxland.petfordesktop" Publisher="${{ env.WINDOWS_MSIX_PUBLISHER }}" Version="$msixVersion" />
+  <Properties>
+    <DisplayName>PetForDesktop</DisplayName>
+    <PublisherDisplayName>Foxland</PublisherDisplayName>
+    <Logo>Assets\Logo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.0.0" MaxVersionTested="10.0.0.0" />
+  </Dependencies>
+  <Applications>
+    <Application Id="PetForDesktop" Executable="bin\\PetForDesktop.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="PetForDesktop"
+        Description="A fox companion like you've never dreamed"
+        Square150x150Logo="Assets\Logo.png"
+        Square44x44Logo="Assets\Logo.png"
+        BackgroundColor="transparent" />
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>
+"@
+
+          Set-Content -Path (Join-Path $staging "AppxManifest.xml") -Value $manifest -NoNewline -Encoding UTF8
+
+          $makeAppx = Get-ChildItem "$env:ProgramFiles(x86)\Windows Kits\10\bin" -Recurse -Filter makeappx.exe -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $makeAppx) {
+            Write-Host "::warning::makeappx.exe not found in Windows SDK. MSIX packaging skipped for this run."
+          } else {
+            try {
+              & $makeAppx.FullName pack /d $staging /p (Join-Path $pwd "${{ env.WINDOWS_MSIX_ARCHIVE }}") /o | Out-Host
+              $packaged = "true"
+            } catch {
+              Write-Host "::warning::MSIX creation failed: $($_.Exception.Message)"
+              $packaged = "false"
+            }
+          }
+
+          if ($packaged -eq "true" -and -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODE_SIGNING_PFX_BASE64)) {
+            $pfxPath = $env:WINDOWS_PFX_PATH
+            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CODE_SIGNING_PFX_BASE64))
+
+            $signTool = Get-ChildItem "$env:ProgramFiles(x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1
+
+            if ($signTool) {
+              try {
+                & $signTool.FullName sign /fd SHA256 /f $pfxPath /p $env:WINDOWS_CODE_SIGNING_PFX_PASSWORD /tr $env:WINDOWS_MSIX_TIMESTAMP_URL /td SHA256 (Join-Path $pwd "${{ env.WINDOWS_MSIX_ARCHIVE }}") | Out-Host
+                $signed = "true"
+              } catch {
+                Write-Host "::warning::Signing failed, continuing with unsigned MSIX: $($_.Exception.Message)"
+                $signed = "false"
+              }
+            } else {
+              Write-Host "::warning::signtool.exe not found. Skipping MSIX signature."
+            }
+
+            Remove-Item -ErrorAction SilentlyContinue $pfxPath
+          } elseif ($packaged -eq "true") {
+            Write-Host "::notice::WINDOWS_CODE_SIGNING_PFX_BASE64 is not set, skipping MSIX signing."
+          }
+
+          if ($packaged -eq "true") {
+            $msixHash = (Get-FileHash -Algorithm SHA256 -Path "${{ env.WINDOWS_MSIX_ARCHIVE }}").Hash.ToLower()
+            "$msixHash  ${{ env.WINDOWS_MSIX_ARCHIVE }}" | Out-File -FilePath "${{ env.WINDOWS_MSIX_SHA }}" -Encoding utf8
+          } else {
+            Set-Content -Path "${{ env.WINDOWS_MSIX_SHA }}" -Value "MSIX packaging skipped for this run" -Encoding utf8
+          }
+
+          "packaged=$packaged" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "signed=$signed" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+          Remove-Item -Recurse -Force $staging
+
+      - name: Stage release artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/windows | Out-Null
+          Copy-Item -Force "${{ env.WINDOWS_ARCHIVE }}" artifacts/windows/
+          Copy-Item -Force "${{ env.WINDOWS_ARCHIVE_SHA }}" artifacts/windows/
+          if (Test-Path "${{ env.WINDOWS_MSIX_ARCHIVE }}") {
+            Copy-Item -Force "${{ env.WINDOWS_MSIX_ARCHIVE }}" artifacts/windows/
+            Copy-Item -Force "${{ env.WINDOWS_MSIX_SHA }}" artifacts/windows/
+            $signedFlag = "${{ steps.make-msix.outputs.signed }}"
+            if ($signedFlag -eq "true") {
+              "MSIX signed: true" | Out-File -Encoding utf8 artifacts/windows/MSIX_SIGNING.md
+            } else {
+              "MSIX signed: false" | Out-File -Encoding utf8 artifacts/windows/MSIX_SIGNING.md
+            }
+          } else {
+            "MSIX not generated" | Out-File -Encoding utf8 artifacts/windows/NOTES_MSIX.txt
+          }
 
       - name: Upload Binaries Artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-release-artifacts
-          path: |
-            ${{ env.WINDOWS_ARCHIVE }}
-            ${{ env.WINDOWS_ARCHIVE }}.sha256
+          path: artifacts/windows/
 
   linux_gcc_clang:
     name: Linux | Clang
@@ -102,15 +251,19 @@ jobs:
           mkdir -p "${BINARY_FOLDER}/${LINUX_FOLDER}/${PROJECT_NAME}"
           cp -r "out/install/linux"/* "${BINARY_FOLDER}/${LINUX_FOLDER}/${PROJECT_NAME}/"
           tar -czvf "${LINUX_ARCHIVE}" -C "${BINARY_FOLDER}/${LINUX_FOLDER}/${PROJECT_NAME}" .
-          sha256sum "${LINUX_ARCHIVE}" > "${LINUX_ARCHIVE}.sha256"
+          sha256sum "${LINUX_ARCHIVE}" > "${LINUX_ARCHIVE_SHA}"
+
+      - name: Stage Linux Artifacts
+        run: |
+          mkdir -p artifacts/linux
+          cp "${LINUX_ARCHIVE}" artifacts/linux/
+          cp "${LINUX_ARCHIVE_SHA}" artifacts/linux/
 
       - name: Upload Binaries Artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-release-artifacts
-          path: |
-            ${LINUX_ARCHIVE}
-            ${LINUX_ARCHIVE}.sha256
+          path: artifacts/linux/
 
   macos:
     name: MacOS | Clang
@@ -147,21 +300,24 @@ jobs:
           mkdir -p "${BINARY_FOLDER}/${MACOS_FOLDER}/${PROJECT_NAME}"
           cp -r "out/install/macos"/* "${BINARY_FOLDER}/${MACOS_FOLDER}/${PROJECT_NAME}/"
           tar -czvf "${MACOS_ARCHIVE}" -C "${BINARY_FOLDER}/${MACOS_FOLDER}/${PROJECT_NAME}" .
-          shasum -a 256 "${MACOS_ARCHIVE}" > "${MACOS_ARCHIVE}.sha256"
+          shasum -a 256 "${MACOS_ARCHIVE}" > "${MACOS_ARCHIVE_SHA}"
+
+      - name: Stage MacOS Artifacts
+        run: |
+          mkdir -p artifacts/macos
+          cp "${MACOS_ARCHIVE}" artifacts/macos/
+          cp "${MACOS_ARCHIVE_SHA}" artifacts/macos/
 
       - name: Upload Binaries Artifact
         uses: actions/upload-artifact@v4
         with:
           name: macos-release-artifacts
-          path: |
-            ${MACOS_ARCHIVE}
-            ${MACOS_ARCHIVE}.sha256
+          path: artifacts/macos/
 
   deploy_release_binaries:
     name: Deploy Binaries
     runs-on: ubuntu-latest
     needs: [windows_msvc, linux_gcc_clang, macos]
-
     steps:
       - name: Fetch Windows Binaries Artifacts
         uses: actions/download-artifact@v4
@@ -181,14 +337,65 @@ jobs:
           name: macos-release-artifacts
           path: ./artifacts/macos
 
+      - name: Verify release artifacts
+        run: |
+          set -euo pipefail
+
+          check_zip() {
+            local file="$1"
+            local expected_file="$2"
+
+            if [ ! -f "$file" ]; then
+              echo "::error::Missing archive: $file"
+              return 1
+            fi
+
+            sha256sum --check "${file}.sha256"
+
+            if ! unzip -l "$file" | awk '{print $NF}' | grep -qx "$expected_file"; then
+              echo "::error::Expected payload '$expected_file' not found in $file"
+              return 1
+            fi
+          }
+
+          check_tar() {
+            local file="$1"
+            local expected_file="$2"
+
+            if [ ! -f "$file" ]; then
+              echo "::error::Missing archive: $file"
+              return 1
+            fi
+
+            sha256sum --check "${file}.sha256"
+
+            if ! tar -tzf "$file" | grep -qx "$expected_file"; then
+              echo "::error::Expected payload '$expected_file' not found in $file"
+              return 1
+            fi
+          }
+
+          check_zip "./artifacts/windows/${WINDOWS_ARCHIVE}" "bin/PetForDesktop.exe"
+          check_tar "./artifacts/linux/${LINUX_ARCHIVE}" "bin/PetForDesktop"
+          check_tar "./artifacts/macos/${MACOS_ARCHIVE}" "bin/PetForDesktop"
+
+          if [ "${{ needs.windows_msvc.outputs.msix-packaged }}" = "true" ]; then
+            if [ ! -f "./artifacts/windows/${WINDOWS_MSIX_ARCHIVE}" ]; then
+              echo "::error::Windows MSIX was reported as packaged but file missing"
+              exit 1
+            fi
+            sha256sum --check "./artifacts/windows/${WINDOWS_MSIX_SHA}"
+            unzip -l "./artifacts/windows/${WINDOWS_MSIX_ARCHIVE}" | awk '{print $NF}' | grep -q "bin/PetForDesktop.exe" || {
+              echo "::error::Expected binary not found in MSIX"
+              exit 1
+            }
+          fi
+
       - name: Publish Release
         uses: softprops/action-gh-release@v1
         with:
           generate_release_notes: true
           files: |
-            ./artifacts/windows/${{ env.WINDOWS_ARCHIVE }}
-            ./artifacts/windows/${{ env.WINDOWS_ARCHIVE }}.sha256
-            ./artifacts/linux/${{ env.LINUX_ARCHIVE }}
-            ./artifacts/linux/${{ env.LINUX_ARCHIVE }}.sha256
-            ./artifacts/macos/${{ env.MACOS_ARCHIVE }}
-            ./artifacts/macos/${{ env.MACOS_ARCHIVE }}.sha256
+            ./artifacts/windows/*
+            ./artifacts/linux/*
+            ./artifacts/macos/*

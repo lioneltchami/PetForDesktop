@@ -1,0 +1,83 @@
+name: iOS Build Scaffold
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROJECT_NAME: ${{ github.event.repository.name }}
+
+jobs:
+  ios_scaffold:
+    name: iOS | Scaffold Build
+    runs-on: macos-latest
+    continue-on-error: true
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Show current toolchain and host status
+        run: |
+          echo "Xcode: $(xcode-select -p)"
+          echo "CMake: $(cmake --version | head -n 1)"
+          echo "Ninja: $(ninja --version)"
+          xcodebuild -version | sed -n '1,2p'
+
+      - name: Validate iOS toolchain configuration
+        env:
+          IOS_CMAKE_TOOLCHAIN_FILE: ${{ vars.IOS_CMAKE_TOOLCHAIN_FILE }}
+          IOS_DEPLOYMENT_TARGET: ${{ vars.IOS_DEPLOYMENT_TARGET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${IOS_CMAKE_TOOLCHAIN_FILE:-}" ]; then
+            echo "::warning::IOS_CMAKE_TOOLCHAIN_FILE is not configured. Add repository variable 'IOS_CMAKE_TOOLCHAIN_FILE' and rerun this workflow to enable full iOS build."
+            exit 0
+          fi
+
+          if [ ! -f "$IOS_CMAKE_TOOLCHAIN_FILE" ]; then
+            echo "::error::IOS_CMAKE_TOOLCHAIN_FILE does not point to an existing file: $IOS_CMAKE_TOOLCHAIN_FILE"
+            exit 1
+          fi
+
+          echo "Toolchain: $IOS_CMAKE_TOOLCHAIN_FILE"
+          if [ -z "${IOS_DEPLOYMENT_TARGET:-}" ]; then
+            echo "::notice::IOS_DEPLOYMENT_TARGET not set; defaulting to iOS 16.0 for this scaffold"
+          fi
+
+      - name: Configure (scaffold only)
+        if: ${{ vars.IOS_CMAKE_TOOLCHAIN_FILE != '' }}
+        env:
+          IOS_CMAKE_TOOLCHAIN_FILE: ${{ vars.IOS_CMAKE_TOOLCHAIN_FILE }}
+          IOS_DEPLOYMENT_TARGET: ${{ vars.IOS_DEPLOYMENT_TARGET }}
+          IOS_ARCHS: ${{ vars.IOS_ARCHS }}
+        run: |
+          set -euo pipefail
+
+          mkdir -p out/ios/scaffold
+          cmake -S . -B out/ios/scaffold \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_SYSTEM_VERSION="${IOS_DEPLOYMENT_TARGET:-16.0}" \
+            -DCMAKE_OSX_ARCHITECTURES="${IOS_ARCHS:-arm64}" \
+            -DCMAKE_TOOLCHAIN_FILE="$IOS_CMAKE_TOOLCHAIN_FILE" \
+            -DPETFORDESKTOP_USE_FETCHCONTENT_DEPS=OFF
+
+      - name: Build (scaffold only)
+        if: ${{ vars.IOS_CMAKE_TOOLCHAIN_FILE != '' }}
+        run: cmake --build out/ios/scaffold --config Release --verbose
+
+      - name: Scaffold summary
+        run: |
+          echo "# iOS Build Scaffold" >> "$GITHUB_STEP_SUMMARY"
+          echo "Repository: ${{ github.repository }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Mode: scaffold run (manual trigger only)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Toolchain file: ${{ vars.IOS_CMAKE_TOOLCHAIN_FILE }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "If this job exits green without build artifacts, configure the iOS-specific environment and run this workflow again." >> "$GITHUB_STEP_SUMMARY"
