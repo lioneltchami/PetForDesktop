@@ -722,6 +722,11 @@ bool test_state_machine_and_transition_helpers()
 
 bool test_physics_motion_drag_and_collision_states()
 {
+    const auto fail = [](const char* step) {
+        std::cout << "physics_motion_drag_and_collision_states fail: " << step << "\n";
+        return false;
+    };
+
     GameData motionData{};
     motionData.pixelPerMeter = {10.f, 10.f};
     motionData.gravity       = {0.f, 0.f};
@@ -744,20 +749,20 @@ bool test_physics_motion_drag_and_collision_states()
     comp.velocity           = {3.f, 0.f};
     motionPhysics.update(comp, interaction, 0.5);
     if (!near(rect.getPosition().x, 35.f) || !near(rect.getPosition().y, 10.f))
-        return false;
+        return fail("first movement position");
     if (!near(comp.velocity.x, 3.f) || !near(comp.velocity.y, 0.f))
-        return false;
+        return fail("first movement velocity");
     if (comp.isGrounded)
-        return false;
+        return fail("first movement grounded flag");
 
     interaction.isLeftSelected = true;
     motionData.deltaCursorPosX  = 7.f;
     motionData.deltaCursorPosY  = -3.f;
     motionPhysics.update(comp, interaction, 0.25);
     if (!near(rect.getPosition().x, 42.f) || !near(rect.getPosition().y, 7.f))
-        return false;
+        return fail("drag movement position");
     if (!near(motionData.deltaCursorPosX, 0.f) || !near(motionData.deltaCursorPosY, 0.f))
-        return false;
+        return fail("drag delta reset");
 
     GameData collisionData{};
     auto     fakeMonitors = std::make_unique<FakeWindowEnumerator>();
@@ -776,10 +781,10 @@ bool test_physics_motion_drag_and_collision_states()
     PhysicComponent groundedComp(groundedRect);
     groundedComp.velocity = {0.f, -0.5f};
     if (!collisionPhysics.checkIsGrounded(groundedComp))
-        return false;
+        return fail("grounded velocity should be grounded");
     groundedComp.velocity = {1.f, 0.f};
     if (collisionPhysics.checkIsGrounded(groundedComp))
-        return false;
+        return fail("horizontal velocity should not be grounded");
 
     Rect collisionRect;
     collisionRect.setPositionSize({1950.f, 1050.f}, {100.f, 100.f});
@@ -790,11 +795,11 @@ bool test_physics_motion_drag_and_collision_states()
     collisionComp.touchScreenEdge    = false;
     collisionPhysics.computeMonitorCollisions(collisionComp);
     if (!collisionComp.touchScreenEdge || !collisionComp.isOnBottomOfWindow || !collisionComp.isGrounded)
-        return false;
+        return fail("collision state flags");
     if (!near(collisionComp.getRect().getPosition().x, 1820.f) || !near(collisionComp.getRect().getPosition().y, 980.f))
-        return false;
+        return fail("collision position");
     if (!near(collisionComp.velocity.x, 0.f) || !near(collisionComp.velocity.y, 0.f))
-        return false;
+        return fail("collision velocity reset");
 
     return true;
 }

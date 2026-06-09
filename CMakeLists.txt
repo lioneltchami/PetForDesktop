@@ -114,6 +114,7 @@ set(PET_IMGUI_ROOT_DIR "${ABS_DEPS_DIR}/imgui/imgui")
 if(EXISTS "${PET_IMGUI_ROOT_DIR}/imgui.h")
     add_subdirectory("${ABS_DEPS_DIR}/imgui")
 elseif(PETFORDESKTOP_USE_FETCHCONTENT_DEPS)
+    set(PET_IMGUI_ROOT_DIR "${CMAKE_BINARY_DIR}/_deps/imgui-src")
     FetchContent_Declare(
         imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
@@ -121,7 +122,7 @@ elseif(PETFORDESKTOP_USE_FETCHCONTENT_DEPS)
         GIT_SHALLOW TRUE
         SOURCE_DIR "${PET_IMGUI_ROOT_DIR}")
     FetchContent_Populate(imgui)
-    add_subdirectory("${ABS_DEPS_DIR}/imgui")
+    add_subdirectory("${PET_IMGUI_ROOT_DIR}")
 else()
     message(FATAL_ERROR
         "Missing Dear ImGui sources at '${PET_IMGUI_ROOT_DIR}'. "
