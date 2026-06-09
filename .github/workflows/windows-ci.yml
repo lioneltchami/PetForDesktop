@@ -10,7 +10,7 @@ permissions:
 jobs:
   build_test_install:
     name: Windows | Build, Test, Install
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     steps:
       - name: Checkout repository

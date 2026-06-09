@@ -30,7 +30,7 @@ env:
 jobs:
   windows_msvc:
     name: Windows | MSVC
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     outputs:
       msix-packaged: ${{ steps.make-msix.outputs.packaged }}
