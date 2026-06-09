@@ -1,5 +1,25 @@
 # Release Notes
 
+## [2026-06-09] Automatic semver tagging for Windows releases
+
+### Scope
+- Successful Windows CI builds on `main` now create the next semver tag automatically.
+
+### High-level outcome
+- Tagged releases are now cut from successful `main` builds without a manual tagging step.
+- The tagged release workflow still publishes the Windows installer and archive assets.
+
+### Before→now matrix
+| File | Before | Now | Behavior impact |
+| --- | --- | --- | --- |
+| `.github/workflows/auto_tag_release.yml` | No automatic release tag creation existed. | A successful Windows CI run on `main` now creates and pushes the next `vX.Y.Z` tag. | New tested changes can flow into a tagged release without a manual tag step. |
+| `.github/workflows/deploy_release.yml` | Tagged release pages had a generic title. | Tagged release pages now call out that the Windows installer is included. | Users immediately see that the release includes a direct installer download. |
+
+### Validation notes
+- The new tag workflow is gated to successful `main` runs only.
+- It skips commits that already have a semver tag.
+- Existing Windows release packaging remains unchanged.
+
 ## [2026-06-09] Windows installer release assets
 
 ### Scope

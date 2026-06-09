@@ -1,0 +1,58 @@
+name: Auto Tag Release
+
+on:
+  workflow_run:
+    workflows: ["Windows CI"]
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+jobs:
+  create_tag:
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+
+      - name: Fetch tags
+        run: git fetch --tags --force
+
+      - name: Create next semver tag
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          existing_tag="$(git tag --points-at "$HEAD_SHA" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
+          if [ -n "$existing_tag" ]; then
+            echo "Semver tag already exists for $HEAD_SHA: $existing_tag"
+            exit 0
+          fi
+
+          latest_tag="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1 || true)"
+          if [ -z "$latest_tag" ]; then
+            base_version="$(awk '/^set\(PROJECT_VERSION / { gsub(/[()]/, ""); print $2; exit }' CMakeLists.txt)"
+            if [ -z "$base_version" ]; then
+              echo "::error::Unable to determine base project version"
+              exit 1
+            fi
+            next_tag="v${base_version}"
+          else
+            version="${latest_tag#v}"
+            IFS=. read -r major minor patch <<<"$version"
+            next_patch=$((patch + 1))
+            next_tag="v${major}.${minor}.${next_patch}"
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "$next_tag" "$HEAD_SHA" -m "Automated release after successful Windows CI"
+          git push origin "$next_tag"
