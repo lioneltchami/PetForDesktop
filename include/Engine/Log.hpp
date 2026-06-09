@@ -27,14 +27,25 @@ inline void logf(char const* const format, ...)
 
 inline void errorAndExit(const std::string& msg)
 {
+#if defined(PET_P2_TESTS)
+    fputs(msg.c_str(), stderr);
+    fputs("\n", stderr);
+    exit(-1);
+#else
     boxer::Selection selection =
         boxer::show(msg.c_str(), PROJECT_NAME " error", boxer::Style::Error, boxer::Buttons::OK);
     exit(-1);
+#endif
 }
 
 inline void warning(const std::string& msg)
 {
+#if defined(PET_P2_TESTS)
+    fputs(msg.c_str(), stderr);
+    fputs("\n", stderr);
+#else
     boxer::show(msg.c_str(), PROJECT_NAME " warning", boxer::Style::Warning, boxer::Buttons::OK);
+#endif
 }
 
 #if defined(USE_OPENGL_API)

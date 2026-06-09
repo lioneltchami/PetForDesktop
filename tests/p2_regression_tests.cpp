@@ -905,7 +905,7 @@ bool test_cursor_delta_pruning()
 }
 } // namespace
 
-int main()
+int main(int argc, char** argv)
 {
     const std::vector<std::pair<const char*, bool (*)()>> tests = {
         {"monitor_scaling_transform", test_monitor_scaling_transform},
@@ -920,6 +920,24 @@ int main()
         {"seeded_walk_and_jump_golden_outcomes", test_seeded_walk_and_jump_golden_outcomes},
         {"cursor_delta_pruning", test_cursor_delta_pruning},
     };
+
+    if (argc > 1)
+    {
+        const std::string selectedTest = argv[1] ? argv[1] : "";
+        for (const auto& [name, fn] : tests)
+        {
+            if (selectedTest == name)
+            {
+                std::cout << "[RUN] " << name << std::endl;
+                const bool ok = fn();
+                std::cout << "[" << (ok ? "PASS" : "FAIL") << "] " << name << "\n";
+                return ok ? 0 : 1;
+            }
+        }
+
+        std::cerr << "Unknown test name: " << selectedTest << "\n";
+        return 1;
+    }
 
     int failed = 0;
     for (const auto& [name, fn] : tests)

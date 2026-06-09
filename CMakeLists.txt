@@ -223,3 +223,22 @@ endif()
 
 add_test(NAME pet-p2-regression COMMAND pet-p2-tests)
 set_tests_properties(pet-p2-regression PROPERTIES TIMEOUT 600)
+
+set(PET_P2_REGRESSION_TEST_NAMES
+    monitor_scaling_transform
+    monitor_fallback_and_selection
+    settings_validation_hardening
+    update_metadata_validation
+    cursor_normalization_for_mixed_scale
+    cursor_normalization_for_scale_variants
+    state_machine_and_transition_helpers
+    physics_motion_drag_and_collision_states
+    pause_resume_and_release_velocity
+    seeded_walk_and_jump_golden_outcomes
+    cursor_delta_pruning
+)
+
+foreach(test_name IN LISTS PET_P2_REGRESSION_TEST_NAMES)
+    add_test(NAME "pet-p2-${test_name}" COMMAND pet-p2-tests "${test_name}")
+    set_tests_properties("pet-p2-${test_name}" PROPERTIES TIMEOUT 120)
+endforeach()
