@@ -28,7 +28,15 @@ public:
     bool isRightRelease;
 
 public:
-    DEFAULT_GETTER_SETTER_VALUE(Rect, m_rect)
+    [[nodiscard]] inline Rect& getRect() noexcept
+    {
+        return m_rect;
+    }
+
+    [[nodiscard]] inline const Rect& getRect() const noexcept
+    {
+        return m_rect;
+    }
 
     InteractionComponent(Rect& rect) : m_rect{rect}
     {

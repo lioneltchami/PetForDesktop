@@ -10,7 +10,15 @@ protected:
     Rect& m_rect;
 
 public:
-    DEFAULT_GETTER_SETTER_VALUE(Rect, m_rect)
+    [[nodiscard]] inline Rect& getRect() noexcept
+    {
+        return m_rect;
+    }
+
+    [[nodiscard]] inline const Rect& getRect() const noexcept
+    {
+        return m_rect;
+    }
 
     Vec2  velocity            = {0.f, 0.f};
     Vec2  continuousVelocity  = {0.f, 0.f};
