@@ -30,6 +30,7 @@ PetForDesktop allows you to integrate and interact with your pet and customize i
 
 ## How to install?
 Just download the [latest version](https://github.com/Renardjojo/PetDesktop/releases/latest) of this application and extract it.
+On Windows, releases now also include a ready-to-run `windows-installer.exe` alongside the archive download.
 
 ## How to build?
 The repo now ships modern CMake presets and an install-first packaging flow.
