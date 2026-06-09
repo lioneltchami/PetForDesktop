@@ -269,11 +269,14 @@ jobs:
         run: |
           set -euo pipefail
 
+          release_title="$VERSION (Windows installer included)"
+
           if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release edit "$VERSION" --title "$release_title"
             gh release upload "$VERSION" ./artifacts/windows/* ./artifacts/linux/* ./artifacts/macos/* --clobber
           else
             gh release create "$VERSION" \
-              --title "$VERSION" \
+              --title "$release_title" \
               --generate-notes \
               ./artifacts/windows/* ./artifacts/linux/* ./artifacts/macos/*
           fi
