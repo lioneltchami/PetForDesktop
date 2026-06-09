@@ -753,6 +753,7 @@ bool test_physics_motion_drag_and_collision_states()
     if (!near(rect.getPosition().x, 35.f) || !near(rect.getPosition().y, 10.f))
     {
         std::cout << "first movement actual position=(" << rect.getPosition().x << ", " << rect.getPosition().y
+                  << ") compRect=(" << comp.getRect().getPosition().x << ", " << comp.getRect().getPosition().y
                   << ") velocity=(" << comp.velocity.x << ", " << comp.velocity.y << ") pixelPerMeter=("
                   << motionPixelPerMeter.x << ", " << motionPixelPerMeter.y << ")\n";
         return fail("first movement position");
