@@ -74,7 +74,6 @@ if (WIN32)
 endif ()
 
 add_executable(${PROJECT_NAME} ${APP_ICON_RESOURCE} ${project_headers} ${project_source_files})
-target_include_directories(${PROJECT_NAME} PRIVATE "${ABS_INCLUDE_DIR}" "${ABS_SRC_DIR}" "${ABS_DEPS_DIR}/imgui/imgui")
 
 if (WIN32 AND CMAKE_BUILD_TYPE MATCHES Release)
     set(SUB_SYS WIN32)
@@ -110,7 +109,24 @@ set(IMGUI_IMPL_DX10 OFF)
 set(IMGUI_IMPL_DX11 OFF)
 set(IMGUI_IMPL_DX12 OFF)
 set(IMGUI_IMPL_VULKAN OFF)
-add_subdirectory(${ABS_DEPS_DIR}/imgui)
+
+set(PET_IMGUI_ROOT_DIR "${ABS_DEPS_DIR}/imgui/imgui")
+if(EXISTS "${PET_IMGUI_ROOT_DIR}/imgui.h")
+    add_subdirectory("${ABS_DEPS_DIR}/imgui")
+elseif(PETFORDESKTOP_USE_FETCHCONTENT_DEPS)
+    FetchContent_Declare(
+        imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG v1.92.8-docking
+        GIT_SHALLOW TRUE
+        SOURCE_DIR "${PET_IMGUI_ROOT_DIR}")
+    FetchContent_Populate(imgui)
+    add_subdirectory("${ABS_DEPS_DIR}/imgui")
+else()
+    message(FATAL_ERROR
+        "Missing Dear ImGui sources at '${PET_IMGUI_ROOT_DIR}'. "
+        "Enable PETFORDESKTOP_USE_FETCHCONTENT_DEPS to fetch it explicitly.")
+endif()
 
 pet_resolve_target(PET_GLFW_TARGET glfw glfw3::glfw3)
 pet_resolve_target(PET_YAMLCPP_TARGET yaml-cpp yaml-cpp::yaml-cpp)
@@ -126,6 +142,8 @@ endforeach()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE ${PET_GLFW_TARGET} ${PET_BOXER_TARGET} ${PET_YAMLCPP_TARGET} ${PET_CPR_TARGET}
                                               imgui imgui-glfw imgui-opengl3)
+
+target_include_directories(${PROJECT_NAME} PRIVATE "${ABS_INCLUDE_DIR}" "${ABS_SRC_DIR}" "${PET_IMGUI_ROOT_DIR}")
 
 if(USE_OPENGL_API)
     find_package(OpenGL REQUIRED)

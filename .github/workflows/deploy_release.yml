@@ -46,16 +46,16 @@ jobs:
           submodules: true
 
       - name: Generate Project
-        run: cmake --preset=x64-Release_ogl
+        run: cmake --preset ci-release
 
       - name: Build Project
-        run: cmake --build --preset x64-Release_ogl --verbose
+        run: cmake --build --preset ci-release --verbose
 
       - name: Run Tests
-        run: ctest --preset x64-Release_ogl -V
+        run: ctest --preset ci-release -V
 
       - name: Install Project
-        run: cmake --install out/x64-Release_ogl --prefix out/install/windows
+        run: cmake --install out/ci-release-modern --prefix out/install/windows
 
       - name: Create Windows release archive
         shell: pwsh
@@ -106,35 +106,35 @@ jobs:
           }
 
           $manifest = @"
-<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
-         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
-         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-         xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
-         IgnorableNamespaces="uap rescap desktop">
-  <Identity Name="com.foxland.petfordesktop" Publisher="${{ env.WINDOWS_MSIX_PUBLISHER }}" Version="$msixVersion" />
-  <Properties>
-    <DisplayName>PetForDesktop</DisplayName>
-    <PublisherDisplayName>Foxland</PublisherDisplayName>
-    <Logo>Assets\Logo.png</Logo>
-  </Properties>
-  <Dependencies>
-    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.0.0" MaxVersionTested="10.0.0.0" />
-  </Dependencies>
-  <Applications>
-    <Application Id="PetForDesktop" Executable="bin\\PetForDesktop.exe" EntryPoint="Windows.FullTrustApplication">
-      <uap:VisualElements
-        DisplayName="PetForDesktop"
-        Description="A fox companion like you've never dreamed"
-        Square150x150Logo="Assets\Logo.png"
-        Square44x44Logo="Assets\Logo.png"
-        BackgroundColor="transparent" />
-    </Application>
-  </Applications>
-  <Capabilities>
-    <rescap:Capability Name="runFullTrust" />
-  </Capabilities>
-</Package>
-"@
+          <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+                   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+                   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
+                   IgnorableNamespaces="uap rescap desktop">
+            <Identity Name="com.foxland.petfordesktop" Publisher="${{ env.WINDOWS_MSIX_PUBLISHER }}" Version="$msixVersion" />
+            <Properties>
+              <DisplayName>PetForDesktop</DisplayName>
+              <PublisherDisplayName>Foxland</PublisherDisplayName>
+              <Logo>Assets\Logo.png</Logo>
+            </Properties>
+            <Dependencies>
+              <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.0.0" MaxVersionTested="10.0.0.0" />
+            </Dependencies>
+            <Applications>
+              <Application Id="PetForDesktop" Executable="bin\\PetForDesktop.exe" EntryPoint="Windows.FullTrustApplication">
+                <uap:VisualElements
+                  DisplayName="PetForDesktop"
+                  Description="A fox companion like you've never dreamed"
+                  Square150x150Logo="Assets\Logo.png"
+                  Square44x44Logo="Assets\Logo.png"
+                  BackgroundColor="transparent" />
+              </Application>
+            </Applications>
+            <Capabilities>
+              <rescap:Capability Name="runFullTrust" />
+            </Capabilities>
+          </Package>
+          "@
 
           Set-Content -Path (Join-Path $staging "AppxManifest.xml") -Value $manifest -NoNewline -Encoding UTF8
 
@@ -234,7 +234,7 @@ jobs:
           sudo apt-get install -y ninja-build
 
       - name: Generate Project
-        run: cmake -B Build/Release -DCMAKE_BUILD_TYPE=Release -G "Ninja"
+        run: cmake -B Build/Release -DCMAKE_BUILD_TYPE=Release -DPETFORDESKTOP_USE_FETCHCONTENT_DEPS=ON -G "Ninja"
 
       - name: Build Project
         run: cmake --build Build/Release --config Release --verbose
@@ -284,7 +284,7 @@ jobs:
           brew install ninja
 
       - name: Generate Project
-        run: cmake -B Build/Release -DCMAKE_BUILD_TYPE=Release -G "Ninja"
+        run: cmake -B Build/Release -DCMAKE_BUILD_TYPE=Release -DPETFORDESKTOP_USE_FETCHCONTENT_DEPS=ON -G "Ninja"
 
       - name: Build Project
         run: cmake --build Build/Release --config Release --verbose
@@ -369,7 +369,7 @@ jobs:
 
             sha256sum --check "${file}.sha256"
 
-            if ! tar -tzf "$file" | grep -qx "$expected_file"; then
+            if ! tar -tzf "$file" | sed 's#^./##' | grep -qx "$expected_file"; then
               echo "::error::Expected payload '$expected_file' not found in $file"
               return 1
             fi
