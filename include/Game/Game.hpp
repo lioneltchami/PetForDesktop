@@ -149,7 +149,8 @@ public:
         }
         else
         {
-            const Vec2 monitorProbe = monitorPos + (monitorSize * 0.5f);
+            const Vec2 monitorProbe = Vec2{static_cast<float>(monitorPos.x), static_cast<float>(monitorPos.y)} +
+                                      (Vec2{static_cast<float>(monitorSize.x), static_cast<float>(monitorSize.y)} * 0.5f);
             datas.pixelPerMeter = datas.monitors.getPixelPerMeterForLogicalPoint(monitorProbe, Vec2{3779.527f, 3779.527f});
         }
 

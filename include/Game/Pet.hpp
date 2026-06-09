@@ -103,7 +103,7 @@ public:
 
     void draw();
 
-    virtual bool isPointInside(Vec2 pointPos);
+    bool isPointInside(Vec2 pointPos) override;
 
     void onRightClic();
 };
