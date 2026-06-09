@@ -18,6 +18,8 @@ env:
   VERSION: ${{ github.ref_name }}
   WINDOWS_ARCHIVE: ${{ github.event.repository.name }}_${{ github.ref_name }}_windows_x64.zip
   WINDOWS_ARCHIVE_SHA: ${{ github.event.repository.name }}_${{ github.ref_name }}_windows_x64.zip.sha256
+  WINDOWS_INSTALLER: PetForDesktopInstaller_${{ github.ref_name }}.exe
+  WINDOWS_INSTALLER_SHA: PetForDesktopInstaller_${{ github.ref_name }}.exe.sha256
   LINUX_ARCHIVE: ${{ github.event.repository.name }}_${{ github.ref_name }}_linux_x64.tar.gz
   LINUX_ARCHIVE_SHA: ${{ github.event.repository.name }}_${{ github.ref_name }}_linux_x64.tar.gz.sha256
   MACOS_ARCHIVE: ${{ github.event.repository.name }}_${{ github.ref_name }}_macos_x64.tar.gz
@@ -57,12 +59,26 @@ jobs:
             -ArchivePath "${{ env.WINDOWS_ARCHIVE }}" `
             -ChecksumPath "${{ env.WINDOWS_ARCHIVE_SHA }}"
 
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Create Windows installer
+        shell: pwsh
+        run: |
+          & scripts/package_windows_installer.ps1 `
+            -Version "${{ github.ref_name }}" `
+            -ArchivePath "out/ci-release-modern/package/${{ env.WINDOWS_INSTALLER }}" `
+            -ChecksumPath "out/ci-release-modern/package/${{ env.WINDOWS_INSTALLER_SHA }}"
+
       - name: Stage release artifacts
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts/windows | Out-Null
           Copy-Item -Force "${{ env.WINDOWS_ARCHIVE }}" artifacts/windows/
           Copy-Item -Force "${{ env.WINDOWS_ARCHIVE_SHA }}" artifacts/windows/
+          Copy-Item -Force "out/ci-release-modern/package/${{ env.WINDOWS_INSTALLER }}" artifacts/windows/
+          Copy-Item -Force "out/ci-release-modern/package/${{ env.WINDOWS_INSTALLER_SHA }}" artifacts/windows/
 
       - name: Upload Binaries Artifact
         uses: actions/upload-artifact@v4
@@ -231,20 +247,20 @@ jobs:
           }
 
           check_zip "./artifacts/windows/${WINDOWS_ARCHIVE}" "bin/PetForDesktop.exe"
+          check_exe() {
+            local file="$1"
+
+            if [ ! -f "$file" ]; then
+              echo "::error::Missing installer: $file"
+              return 1
+            fi
+
+            sha256sum --check "${file}.sha256"
+          }
+
+          check_exe "./artifacts/windows/${WINDOWS_INSTALLER}"
           check_tar "./artifacts/linux/${LINUX_ARCHIVE}" "bin/PetForDesktop"
           check_tar "./artifacts/macos/${MACOS_ARCHIVE}" "bin/PetForDesktop"
-
-          if [ "${{ needs.windows_msvc.outputs.msix-packaged }}" = "true" ]; then
-            if [ ! -f "./artifacts/windows/${WINDOWS_MSIX_ARCHIVE}" ]; then
-              echo "::error::Windows MSIX was reported as packaged but file missing"
-              exit 1
-            fi
-            sha256sum --check "./artifacts/windows/${WINDOWS_MSIX_SHA}"
-            unzip -l "./artifacts/windows/${WINDOWS_MSIX_ARCHIVE}" | awk '{print $NF}' | grep -q "bin/PetForDesktop.exe" || {
-              echo "::error::Expected binary not found in MSIX"
-              exit 1
-            }
-          fi
 
       - name: Publish Release
         shell: bash

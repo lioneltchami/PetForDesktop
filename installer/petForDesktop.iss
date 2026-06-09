@@ -4,7 +4,9 @@
 ; the install tree first so signed package formats can be layered on top.
 
 #define MyAppName "PetForDesktop"
+#ifndef MyAppVersion
 #define MyAppVersion "1.4.1"
+#endif
 #define MyAppPublisher "Foxland"
 #define MyAppURL "https://github.com/Renardjojo/PetForDesktop"
 #define MyAppExeName "PetForDesktop.exe"

@@ -38,6 +38,20 @@ jobs:
             -ArchivePath out/ci-release-modern/package/windows-package.zip `
             -ChecksumPath out/ci-release-modern/package/windows-package.zip.sha256
 
+      - name: Install Inno Setup
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Create Windows installer
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: |
+          & scripts/package_windows_installer.ps1 `
+            -Version "nightly" `
+            -ArchivePath out/ci-release-modern/package/windows-installer.exe `
+            -ChecksumPath out/ci-release-modern/package/windows-installer.exe.sha256
+
       - name: Upload install tree
         uses: actions/upload-artifact@v4
         with:
@@ -48,9 +62,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-package
-          path: |
-            out/ci-release-modern/package/*.zip
-            out/ci-release-modern/package/*.sha256
+          path: out/ci-release-modern/package/
 
       - name: Publish nightly release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -63,7 +75,7 @@ jobs:
           release_tag="nightly"
           release_title="Nightly"
           release_notes="Automated Windows build from ${GITHUB_SHA}"
-          assets=(out/ci-release-modern/package/*.zip out/ci-release-modern/package/*.sha256)
+          assets=(out/ci-release-modern/package/*.zip out/ci-release-modern/package/*.sha256 out/ci-release-modern/package/*.exe)
 
           if gh release view "$release_tag" >/dev/null 2>&1; then
             gh release upload "$release_tag" "${assets[@]}" --clobber
