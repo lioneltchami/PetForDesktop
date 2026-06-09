@@ -164,6 +164,7 @@ if(USE_OPENGL_API)
 endif()
 
 if (WIN32)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE WIN32_LEAN_AND_MEAN)
     target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX)
 endif ()
 
@@ -214,5 +215,10 @@ target_compile_definitions(pet-p2-tests PRIVATE PET_P2_TESTS)
 target_compile_definitions(pet-p2-tests PRIVATE PROJECT_NAME="${PROJECT_NAME}")
 target_compile_definitions(pet-p2-tests PRIVATE PROJECT_VERSION="${PROJECT_VERSION}")
 target_compile_definitions(pet-p2-tests PRIVATE RESOURCE_PATH="${REL_RESOURCES_DIR}")
+
+if(WIN32)
+    target_compile_definitions(pet-p2-tests PRIVATE WIN32_LEAN_AND_MEAN)
+    target_compile_definitions(pet-p2-tests PRIVATE NOMINMAX)
+endif()
 
 add_test(NAME pet-p2-regression COMMAND pet-p2-tests)

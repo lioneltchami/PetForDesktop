@@ -33,19 +33,10 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path out/ci-release-modern/package | Out-Null
-          cpack --config out/ci-release-modern/CPackConfig.cmake -G ZIP -B out/ci-release-modern/package
-          if (-not (Test-Path out/ci-release-modern/package/*.zip)) {
-            throw "No package zip produced by CPack"
-          }
-
-      - name: Package checksum
-        shell: pwsh
-        run: |
-          Get-ChildItem -Path out/ci-release-modern/package -Filter *.zip | ForEach-Object {
-            $hash = (Get-FileHash -Path $_.FullName -Algorithm SHA256).Hash.ToLower()
-            "$hash  $($_.Name)" | Out-File -FilePath "$($_.FullName).sha256" -Encoding utf8
-          }
+          & scripts/package_windows_release.ps1 `
+            -SourceRoot out/install/windows `
+            -ArchivePath out/ci-release-modern/package/windows-package.zip `
+            -ChecksumPath out/ci-release-modern/package/windows-package.zip.sha256
 
       - name: Upload install tree
         uses: actions/upload-artifact@v4
