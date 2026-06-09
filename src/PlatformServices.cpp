@@ -96,9 +96,9 @@ public:
 } // namespace
 
 #ifdef _WIN32
-#include <shellapi.h>
 #include <shobjidl.h>
 #include <windows.h>
+#include <shellapi.h>
 #else
 #include <cstdlib>
 #endif
