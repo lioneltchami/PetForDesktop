@@ -6,27 +6,33 @@ on:
       - 'v*.*.*'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 env:
-  PROJECT_NAME: ${{github.event.repository.name}}
+  PROJECT_NAME: ${{ github.event.repository.name }}
   BINARY_FOLDER: ProjectBinaries
   WIN64_FOLDER: Windows
   LINUX_FOLDER: Linux
   MACOS_FOLDER: MaxOs
-  VERSION: ${GITHUB_REF/refs\/tags\//}
+  VERSION: ${{ github.ref_name }}
+  WINDOWS_ARCHIVE: ${{ github.event.repository.name }}_${{ github.ref_name }}_windows_x64.zip
+  LINUX_ARCHIVE: ${{ github.event.repository.name }}_${{ github.ref_name }}_linux_x64.tar.gz
+  MACOS_ARCHIVE: ${{ github.event.repository.name }}_${{ github.ref_name }}_macos_x64.tar.gz
 
 jobs:
   windows_msvc:
     name: Windows | MSVC
-    runs-on: windows-2019
+    runs-on: windows-latest
 
     strategy:
       fail-fast: false
-      
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
-          submodules: 'recursive'
+          submodules: true
 
       - name: Generate Project
         run: cmake --preset=x64-Release_ogl
@@ -40,20 +46,25 @@ jobs:
       - name: Install Project
         run: cmake --install out/x64-Release_ogl --prefix out/install/windows
 
-      - name: Setup Binaries Artifact
+      - name: Create Windows release archive
+        shell: pwsh
         run: |
-          mkdir ${{env.BINARY_FOLDER}}
-          mkdir ${{env.BINARY_FOLDER}}/${{env.WIN64_FOLDER}}
-          mkdir ${{env.BINARY_FOLDER}}/${{env.WIN64_FOLDER}}/${{env.PROJECT_NAME}}
+          New-Item -ItemType Directory -Force -Path "${{ env.BINARY_FOLDER }}/${{ env.WIN64_FOLDER }}" | Out-Null
+          New-Item -ItemType Directory -Force -Path "${{ env.BINARY_FOLDER }}/${{ env.WIN64_FOLDER }}/${{ env.PROJECT_NAME }}" | Out-Null
+          Copy-Item -Recurse -Force "out/install/windows/*" "${{ env.BINARY_FOLDER }}/${{ env.WIN64_FOLDER }}/${{ env.PROJECT_NAME }}/"
 
-          Copy-Item -Recurse -Force out/install/windows/* ${{env.BINARY_FOLDER}}/${{env.WIN64_FOLDER}}/${{env.PROJECT_NAME}}/
+          Compress-Archive -Path "${{ env.BINARY_FOLDER }}/${{ env.WIN64_FOLDER }}/${{ env.PROJECT_NAME }}/*" -DestinationPath "${{ env.WINDOWS_ARCHIVE }}" -CompressionLevel Optimal
+
+          $hash = (Get-FileHash -Algorithm SHA256 -Path "${{ env.WINDOWS_ARCHIVE }}").Hash.ToLower()
+          "$hash  ${{ env.WINDOWS_ARCHIVE }}" | Out-File -Encoding utf8 "${{ env.WINDOWS_ARCHIVE }}.sha256"
 
       - name: Upload Binaries Artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{env.BINARY_FOLDER}}
-          path: ./${{env.BINARY_FOLDER}}
-          retention-days: 7
+          name: windows-release-artifacts
+          path: |
+            ${{ env.WINDOWS_ARCHIVE }}
+            ${{ env.WINDOWS_ARCHIVE }}.sha256
 
   linux_gcc_clang:
     name: Linux | Clang
@@ -61,38 +72,17 @@ jobs:
 
     strategy:
       fail-fast: false
-      matrix:
-        compiler: [clang++-11]
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
-          submodules: 'recursive'
-
-      - name: Install suitable compiler
-        run: sudo apt-get install ${{ matrix.compiler }}
+          submodules: true
 
       - name: Install ninja
-        uses: seanmiddleditch/gha-setup-ninja@master
-
-      - name: Install CMake
-        uses: jwlawson/actions-setup-cmake@v1.8
-        with:
-          cmake-version: '3.15.0'
-
-      - name: Substitute Compiler Name
-        uses: bluwy/substitute-string-action@v1
-        id: replace_compiler
-        with:
-          _input-text: ${{ matrix.compiler }}
-          clang++: 'clang'
-          g++: 'gcc'
-
-      - name: Setup Compiler
         run: |
-          echo "CC=${{ steps.replace_compiler.outputs.result }}" >> $GITHUB_ENV
-          echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV
+          sudo apt-get update
+          sudo apt-get install -y ninja-build
 
       - name: Generate Project
         run: cmake -B Build/Release -DCMAKE_BUILD_TYPE=Release -G "Ninja"
@@ -102,25 +92,25 @@ jobs:
 
       - name: Run Tests
         run: |
-          cd Build/Release && ctest -C Release -V
-  
-      - name: Setup Binaries Artifact
+          ctest --test-dir Build/Release -C Release -V
+
+      - name: Install Project
+        run: cmake --install Build/Release --prefix out/install/linux
+
+      - name: Create Linux release archive
         run: |
-          mkdir ${{env.BINARY_FOLDER}}
-          mkdir ${{env.BINARY_FOLDER}}/${{env.LINUX_FOLDER}}
-          mkdir ${{env.BINARY_FOLDER}}/${{env.LINUX_FOLDER}}/${{env.PROJECT_NAME}}
-
-          mv Build/Release/Release/$PROJECT_NAME ${{env.BINARY_FOLDER}}/${{env.LINUX_FOLDER}}/${{env.PROJECT_NAME}}
-          mv content ${{env.BINARY_FOLDER}}/${{env.LINUX_FOLDER}}/${{env.PROJECT_NAME}}
-
-          mv README.md ${{env.BINARY_FOLDER}}/${{env.LINUX_FOLDER}}/${{env.PROJECT_NAME}}/
+          mkdir -p "${BINARY_FOLDER}/${LINUX_FOLDER}/${PROJECT_NAME}"
+          cp -r "out/install/linux"/* "${BINARY_FOLDER}/${LINUX_FOLDER}/${PROJECT_NAME}/"
+          tar -czvf "${LINUX_ARCHIVE}" -C "${BINARY_FOLDER}/${LINUX_FOLDER}/${PROJECT_NAME}" .
+          sha256sum "${LINUX_ARCHIVE}" > "${LINUX_ARCHIVE}.sha256"
 
       - name: Upload Binaries Artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{env.BINARY_FOLDER}}
-          path: ./${{env.BINARY_FOLDER}}
-          retention-days: 7
+          name: linux-release-artifacts
+          path: |
+            ${LINUX_ARCHIVE}
+            ${LINUX_ARCHIVE}.sha256
 
   macos:
     name: MacOS | Clang
@@ -131,17 +121,14 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
-          submodules: 'recursive'
+          submodules: true
 
       - name: Install ninja
-        uses: seanmiddleditch/gha-setup-ninja@master
-
-      - name: Install CMake
-        uses: jwlawson/actions-setup-cmake@v1.8
-        with:
-          cmake-version: '3.15.0'
+        run: |
+          brew update
+          brew install ninja
 
       - name: Generate Project
         run: cmake -B Build/Release -DCMAKE_BUILD_TYPE=Release -G "Ninja"
@@ -149,71 +136,59 @@ jobs:
       - name: Build Project
         run: cmake --build Build/Release --config Release --verbose
 
-      - name: Setup Binaries Artifact
+      - name: Run Tests
+        run: ctest --test-dir Build/Release -C Release -V
+
+      - name: Install Project
+        run: cmake --install Build/Release --prefix out/install/macos
+
+      - name: Create MacOS release archive
         run: |
-          mkdir ${{env.BINARY_FOLDER}}
-          mkdir ${{env.BINARY_FOLDER}}/${{env.MACOS_FOLDER}}
-          mkdir ${{env.BINARY_FOLDER}}/${{env.MACOS_FOLDER}}/${{env.PROJECT_NAME}}
-
-          mv Build/Release/Release/$PROJECT_NAME ${{env.BINARY_FOLDER}}/${{env.MACOS_FOLDER}}/${{env.PROJECT_NAME}}
-          mv content ${{env.BINARY_FOLDER}}/${{env.MACOS_FOLDER}}/${{env.PROJECT_NAME}}
-
-          mv README.md ${{env.BINARY_FOLDER}}/${{env.MACOS_FOLDER}}/${{env.PROJECT_NAME}}/
+          mkdir -p "${BINARY_FOLDER}/${MACOS_FOLDER}/${PROJECT_NAME}"
+          cp -r "out/install/macos"/* "${BINARY_FOLDER}/${MACOS_FOLDER}/${PROJECT_NAME}/"
+          tar -czvf "${MACOS_ARCHIVE}" -C "${BINARY_FOLDER}/${MACOS_FOLDER}/${PROJECT_NAME}" .
+          shasum -a 256 "${MACOS_ARCHIVE}" > "${MACOS_ARCHIVE}.sha256"
 
       - name: Upload Binaries Artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{env.BINARY_FOLDER}}
-          path: ./${{env.BINARY_FOLDER}}
-          retention-days: 7
+          name: macos-release-artifacts
+          path: |
+            ${MACOS_ARCHIVE}
+            ${MACOS_ARCHIVE}.sha256
 
   deploy_release_binaries:
     name: Deploy Binaries
     runs-on: ubuntu-latest
     needs: [windows_msvc, linux_gcc_clang, macos]
-    if: ${{ always() && contains(needs.*.result, 'success') }}
+
     steps:
-      - name: Install zip
-        run: sudo apt-get install zip
-        
-      - name: Fetch Binaries Artifacts
-        uses: actions/download-artifact@v2
+      - name: Fetch Windows Binaries Artifacts
+        uses: actions/download-artifact@v4
         with:
-          name: ${{env.BINARY_FOLDER}}
-          path: ./${{env.BINARY_FOLDER}}
+          name: windows-release-artifacts
+          path: ./artifacts/windows
 
-      - name: Linux environment variable
-        if: needs.linux_gcc_clang.result == 'success'
-        run: echo "LINUX_ARCHIVE_PATH=$PROJECT_NAME_$VERSION_linux.tar.gz" >> $GITHUB_ENV
+      - name: Fetch Linux Binaries Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-release-artifacts
+          path: ./artifacts/linux
 
-      - name: Build Linux Binaries Archive
-        if: needs.linux_gcc_clang.result == 'success'
-        run: |
-          tar -czvf ${{env.LINUX_ARCHIVE_PATH}} --directory ${{env.BINARY_FOLDER}}/${{env.LINUX_FOLDER}}/${{env.PROJECT_NAME}} .
-
-      - name: Windows environment variable
-        if: needs.windows_msvc.result == 'success'
-        run: echo "WIN_ARCHIVE_PATH=${{env.PROJECT_NAME}}_${{env.VERSION}}_windows_x64.zip" >> $GITHUB_ENV
-
-      - name: Build Windows Binaries Archive
-        if: needs.windows_msvc.result == 'success'
-        run: |
-          (cd ${{env.BINARY_FOLDER}}/${{env.WIN64_FOLDER}}/${{env.PROJECT_NAME}} && zip -r - .) > ${{env.WIN_ARCHIVE_PATH}}
-
-      - name: MacOS environment variable
-        if: needs.macos.result == 'success'
-        run: echo "MAC_ARCHIVE_PATH=$PROJECT_NAME_$VERSION_macos.tar.gz" >> $GITHUB_ENV
-
-      - name: Build MacOS Binaries Archive
-        if: needs.macos.result == 'success'
-        run: |
-          tar -czvf ${{env.MAC_ARCHIVE_PATH}} --directory ${{env.BINARY_FOLDER}}/${{env.MACOS_FOLDER}}/${{env.PROJECT_NAME}} .
+      - name: Fetch MacOS Binaries Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-release-artifacts
+          path: ./artifacts/macos
 
       - name: Publish Release
         uses: softprops/action-gh-release@v1
         with:
           generate_release_notes: true
           files: |
-            ${{env.LINUX_ARCHIVE_PATH}}
-            ${{env.WIN_ARCHIVE_PATH}}
-            ${{env.MAC_ARCHIVE_PATH}}
+            ./artifacts/windows/${{ env.WINDOWS_ARCHIVE }}
+            ./artifacts/windows/${{ env.WINDOWS_ARCHIVE }}.sha256
+            ./artifacts/linux/${{ env.LINUX_ARCHIVE }}
+            ./artifacts/linux/${{ env.LINUX_ARCHIVE }}.sha256
+            ./artifacts/macos/${{ env.MACOS_ARCHIVE }}
+            ./artifacts/macos/${{ env.MACOS_ARCHIVE }}.sha256
