@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   create_tag:
@@ -32,27 +33,63 @@ jobs:
 
           existing_tag="$(git tag --points-at "$HEAD_SHA" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
           if [ -n "$existing_tag" ]; then
+            next_tag="$existing_tag"
             echo "Semver tag already exists for $HEAD_SHA: $existing_tag"
-            exit 0
-          fi
-
-          latest_tag="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1 || true)"
-          if [ -z "$latest_tag" ]; then
-            base_version="$(awk '/^set\(PROJECT_VERSION / { gsub(/[()]/, ""); print $2; exit }' CMakeLists.txt)"
-            if [ -z "$base_version" ]; then
-              echo "::error::Unable to determine base project version"
-              exit 1
-            fi
-            next_tag="v${base_version}"
           else
-            version="${latest_tag#v}"
-            IFS=. read -r major minor patch <<<"$version"
-            next_patch=$((patch + 1))
-            next_tag="v${major}.${minor}.${next_patch}"
+            latest_tag="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1 || true)"
+            if [ -z "$latest_tag" ]; then
+              base_version="$(sed -n 's/^set(PROJECT_VERSION \([0-9][0-9.]*\)).*/\1/p' CMakeLists.txt | head -n1)"
+              if [ -z "$base_version" ]; then
+                echo "::error::Unable to determine base project version"
+                exit 1
+              fi
+              next_tag="v${base_version}"
+            else
+              version="${latest_tag#v}"
+              IFS=. read -r major minor patch <<<"$version"
+              next_patch=$((patch + 1))
+              next_tag="v${major}.${minor}.${next_patch}"
+            fi
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          echo "NEXT_TAG=$next_tag" >> "$GITHUB_ENV"
 
-          git tag -a "$next_tag" "$HEAD_SHA" -m "Automated release after successful Windows CI"
-          git push origin "$next_tag"
+          if [ -z "$existing_tag" ]; then
+            git tag -a "$next_tag" "$HEAD_SHA" -m "Automated release after successful Windows CI"
+            git push origin "$next_tag"
+          fi
+
+      - name: Download Windows release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          rm -rf release-assets
+          mkdir -p release-assets
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n windows-package -D release-assets/windows-package
+
+      - name: Publish tagged release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+
+          release_title="$NEXT_TAG (Windows installer included)"
+          release_notes="Automated Windows release after successful CI on ${HEAD_SHA}."
+
+          mapfile -t assets < <(find release-assets/windows-package -type f | sort)
+
+          if gh release view "$NEXT_TAG" >/dev/null 2>&1; then
+            gh release edit "$NEXT_TAG" --title "$release_title" --notes "$release_notes"
+            gh release upload "$NEXT_TAG" "${assets[@]}" --clobber
+          else
+            gh release create "$NEXT_TAG" \
+              --title "$release_title" \
+              --notes "$release_notes" \
+              --target "$HEAD_SHA" \
+              "${assets[@]}"
+          fi
