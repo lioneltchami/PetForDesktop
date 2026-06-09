@@ -737,6 +737,7 @@ bool test_physics_motion_drag_and_collision_states()
     motionData.isGroundedDetection               = 1.f;
     motionData.footBasementWidth                 = 4;
     motionData.footBasementHeight                = 4;
+    motionData.monitors.setImplementation(std::make_unique<FakeWindowEnumerator>());
 
     PhysicSystem motionPhysics(motionData);
 
