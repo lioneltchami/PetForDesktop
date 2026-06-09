@@ -749,8 +749,14 @@ bool test_physics_motion_drag_and_collision_states()
     comp.continuousVelocity = {2.f, 0.f};
     comp.velocity           = {3.f, 0.f};
     motionPhysics.update(comp, interaction, 0.5);
+    const Vec2 motionPixelPerMeter = motionData.monitors.getPixelPerMeterForLogicalPoint(rect.getPosition(), motionData.pixelPerMeter);
     if (!near(rect.getPosition().x, 35.f) || !near(rect.getPosition().y, 10.f))
+    {
+        std::cout << "first movement actual position=(" << rect.getPosition().x << ", " << rect.getPosition().y
+                  << ") velocity=(" << comp.velocity.x << ", " << comp.velocity.y << ") pixelPerMeter=("
+                  << motionPixelPerMeter.x << ", " << motionPixelPerMeter.y << ")\n";
         return fail("first movement position");
+    }
     if (!near(comp.velocity.x, 3.f) || !near(comp.velocity.y, 0.f))
         return fail("first movement velocity");
     if (comp.isGrounded)
