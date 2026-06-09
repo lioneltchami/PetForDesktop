@@ -17,15 +17,15 @@ public:
     std::function<void()> onRightPressOver;
     std::function<void()> onRightReleaseOver;
 
-    bool isLeftSelected;
-    bool isRightSelected;
+    bool isLeftSelected   = false;
+    bool isRightSelected  = false;
 
     // One frame
-    bool isMouseOver;
-    bool isLeftPressOver;
-    bool isLeftRelease;
-    bool isRightPressOver;
-    bool isRightRelease;
+    bool isMouseOver      = false;
+    bool isLeftPressOver  = false;
+    bool isLeftRelease    = false;
+    bool isRightPressOver = false;
+    bool isRightRelease   = false;
 
 public:
     [[nodiscard]] inline Rect& getRect() noexcept
